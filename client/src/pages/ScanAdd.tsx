@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { Html5Qrcode, Html5QrcodeScanner } from "html5-qrcode";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,42 +18,110 @@ export default function ScanAdd() {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [coverImage, setCoverImage] = useState<string | null>(null);
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const scannerStarted = useRef(false);
 
   const shelves = trpc.shelves.list.useQuery();
   const createBook = trpc.books.create.useMutation();
   const utils = trpc.useUtils();
 
+  const stopScanner = useCallback(async () => {
+    if (scannerRef.current && scannerStarted.current) {
+      try {
+        await scannerRef.current.stop();
+        scannerRef.current.clear();
+      } catch (e) {
+        // ignore stop errors
+      }
+      scannerStarted.current = false;
+    }
+    setScannerActive(false);
+  }, []);
+
   useEffect(() => {
     if (!scannerActive) return;
 
-    const scanner = new Html5QrcodeScanner(
-      "qr-reader",
-      {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-        rememberLastUsedCamera: true,
-      },
-      false
-    );
+    setScannerError(null);
+    const html5QrCode = new Html5Qrcode("qr-reader", {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.QR_CODE,
+      ],
+      verbose: false,
+    });
+    scannerRef.current = html5QrCode;
 
-    scanner.render(
-      (decodedText) => {
-        setIsbn(decodedText);
+    // Get camera list and start with back camera
+    Html5Qrcode.getCameras()
+      .then((cameras) => {
+        if (!cameras || cameras.length === 0) {
+          setScannerError("No camera found on this device.");
+          setScannerActive(false);
+          return;
+        }
+
+        // Prefer back/environment camera
+        const backCamera = cameras.find(
+          (c) =>
+            c.label.toLowerCase().includes("back") ||
+            c.label.toLowerCase().includes("rear") ||
+            c.label.toLowerCase().includes("environment")
+        );
+        const cameraId = backCamera ? backCamera.id : cameras[cameras.length - 1].id;
+
+        return html5QrCode.start(
+          cameraId,
+          {
+            fps: 15,
+            // Wide rectangular box optimised for EAN-13/ISBN barcodes
+            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+              const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+              return {
+                width: Math.floor(minEdge * 0.85),
+                height: Math.floor(minEdge * 0.35),
+              };
+            },
+            aspectRatio: 1.5,
+
+          },
+          (decodedText) => {
+            // Clean up ISBN: remove hyphens and spaces
+            const cleanIsbn = decodedText.replace(/[\s-]/g, "");
+            setIsbn(cleanIsbn);
+            stopScanner();
+            handleLookup(cleanIsbn);
+          },
+          () => {
+            // Per-frame scan error — ignore, this fires constantly
+          }
+        );
+      })
+      .then(() => {
+        scannerStarted.current = true;
+      })
+      .catch((err) => {
+        const msg = String(err);
+        if (msg.includes("Permission") || msg.includes("permission")) {
+          setScannerError("Camera permission denied. Please allow camera access in your browser settings.");
+        } else {
+          setScannerError("Could not start camera: " + msg);
+        }
         setScannerActive(false);
-        scanner.clear();
-        handleLookup(decodedText);
-      },
-      () => {}
-    );
-
-    scannerRef.current = scanner;
+      });
 
     return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear();
+      if (scannerRef.current && scannerStarted.current) {
+        scannerRef.current.stop().catch(() => {});
+        scannerStarted.current = false;
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scannerActive]);
 
   const handleLookup = async (isbnValue: string) => {
@@ -140,10 +208,22 @@ export default function ScanAdd() {
             <CardDescription>Point your camera at the ISBN barcode on the back of the book</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {scannerError && (
+              <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
+                {scannerError}
+              </div>
+            )}
+
             {scannerActive ? (
-              <div className="space-y-4">
-                <div id="qr-reader" style={{ width: "100%", maxWidth: "500px" }}></div>
-                <Button onClick={() => setScannerActive(false)} variant="outline" className="w-full">
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground text-center">
+                  Hold the barcode horizontally inside the scanning frame
+                </p>
+                <div
+                  id="qr-reader"
+                  style={{ width: "100%", maxWidth: "520px", margin: "0 auto" }}
+                />
+                <Button onClick={stopScanner} variant="outline" className="w-full">
                   <X className="w-4 h-4 mr-2" />
                   Stop Scanner
                 </Button>
