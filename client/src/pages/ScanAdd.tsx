@@ -9,14 +9,30 @@ import { Textarea } from "@/components/ui/textarea";
 import { Spinner } from "@/components/ui/spinner";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Camera, Upload, X } from "lucide-react";
+import { Camera, Upload, X, PenLine } from "lucide-react";
+
+const EMPTY_FORM = {
+  isbn: "",
+  title: "",
+  authors: "",
+  publisher: "",
+  published_year: "",
+  genre: "",
+  description: "",
+  page_count: "",
+  language: "",
+  cover_url: "",
+  purchase_price: "",
+  shelf_location_id: "",
+};
 
 export default function ScanAdd() {
   const [scannerActive, setScannerActive] = useState(false);
   const [isbn, setIsbn] = useState("");
+  // bookData is null (no form), "manual" (manual mode), or the looked-up data object
   const [bookData, setBookData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState<any>({});
+  const [formData, setFormData] = useState<any>({ ...EMPTY_FORM });
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
@@ -44,7 +60,6 @@ export default function ScanAdd() {
       toast.success("Cover uploaded to cloud storage");
     } catch (err) {
       toast.error("Cover upload failed — using local preview");
-      // Fallback: use local base64 preview
       const reader = new FileReader();
       reader.onload = (e: any) => {
         setCoverImage(e.target.result);
@@ -87,7 +102,6 @@ export default function ScanAdd() {
     });
     scannerRef.current = html5QrCode;
 
-    // Get camera list and start with back camera
     Html5Qrcode.getCameras()
       .then((cameras) => {
         if (!cameras || cameras.length === 0) {
@@ -96,7 +110,6 @@ export default function ScanAdd() {
           return;
         }
 
-        // Prefer back/environment camera
         const backCamera = cameras.find(
           (c) =>
             c.label.toLowerCase().includes("back") ||
@@ -109,7 +122,6 @@ export default function ScanAdd() {
           cameraId,
           {
             fps: 15,
-            // Wide rectangular box optimised for EAN-13/ISBN barcodes
             qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
               const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
               return {
@@ -118,18 +130,14 @@ export default function ScanAdd() {
               };
             },
             aspectRatio: 1.5,
-
           },
           (decodedText) => {
-            // Clean up ISBN: remove hyphens and spaces
             const cleanIsbn = decodedText.replace(/[\s-]/g, "");
             setIsbn(cleanIsbn);
             stopScanner();
             handleLookup(cleanIsbn);
           },
-          () => {
-            // Per-frame scan error — ignore, this fires constantly
-          }
+          () => {}
         );
       })
       .then(() => {
@@ -155,9 +163,10 @@ export default function ScanAdd() {
   }, [scannerActive]);
 
   const handleLookup = async (isbnValue: string) => {
+    if (!isbnValue.trim()) return;
     setLoading(true);
     try {
-      const result = await utils.books.lookup.fetch({ isbn: isbnValue });
+      const result = await utils.books.lookup.fetch({ isbn: isbnValue.trim() });
       if (result) {
         setBookData(result);
         setFormData({
@@ -177,28 +186,41 @@ export default function ScanAdd() {
         if (result.coverUrl) {
           setCoverImage(result.coverUrl);
         }
+        toast.success("Book found! Review the details below.");
       } else {
-        toast.error("Book not found. Please fill in the details manually.");
-        setFormData({
-          isbn: isbnValue,
-          title: "",
-          authors: "",
-          publisher: "",
-          published_year: "",
-          genre: "",
-          description: "",
-          page_count: "",
-          language: "",
-          cover_url: "",
-          purchase_price: "",
-          shelf_location_id: "",
-        });
+        // Not found — open manual form pre-filled with the ISBN
+        toast.info("Book not found in database. Please fill in the details manually.");
+        setFormData({ ...EMPTY_FORM, isbn: isbnValue });
+        setBookData("notfound");
+        setCoverImage(null);
       }
-    } catch (error) {
-      toast.error("Error looking up book");
+    } catch (error: any) {
+      const msg = String(error?.message || error);
+      if (msg.includes("429") || msg.includes("quota") || msg.toLowerCase().includes("quota")) {
+        toast.warning("Book lookup API quota reached for today. Please fill in the details manually.");
+      } else {
+        toast.error("Error looking up book. Please fill in the details manually.");
+      }
+      setFormData({ ...EMPTY_FORM, isbn: isbnValue });
+      setBookData("notfound");
+      setCoverImage(null);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAddManually = () => {
+    setFormData({ ...EMPTY_FORM });
+    setBookData("manual");
+    setCoverImage(null);
+    setScannerActive(false);
+  };
+
+  const handleReset = () => {
+    setBookData(null);
+    setIsbn("");
+    setFormData({ ...EMPTY_FORM });
+    setCoverImage(null);
   };
 
   const handleSave = async () => {
@@ -214,28 +236,27 @@ export default function ScanAdd() {
         purchase_price: formData.purchase_price ? parseFloat(formData.purchase_price) : undefined,
         shelf_location_id: formData.shelf_location_id ? parseInt(formData.shelf_location_id) : undefined,
       });
-      toast.success("Book added successfully!");
-      setIsbn("");
-      setBookData(null);
-      setFormData({});
-      setCoverImage(null);
+      toast.success("Book added to your library!");
+      handleReset();
     } catch (error) {
       toast.error("Error saving book");
     }
   };
 
+  const isFormMode = bookData !== null;
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Scan & Add Book</h1>
-        <p className="text-muted-foreground mt-2">Scan ISBN barcode or manually enter book details</p>
+        <p className="text-muted-foreground mt-2">Scan an ISBN barcode, look up by ISBN, or add all details manually</p>
       </div>
 
-      {!bookData ? (
+      {!isFormMode ? (
         <Card>
           <CardHeader>
-            <CardTitle>Scan ISBN Barcode</CardTitle>
-            <CardDescription>Point your camera at the ISBN barcode on the back of the book</CardDescription>
+            <CardTitle>Add a Book</CardTitle>
+            <CardDescription>Scan the barcode, enter the ISBN, or fill in all details yourself</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {scannerError && (
@@ -261,40 +282,59 @@ export default function ScanAdd() {
             ) : (
               <Button onClick={() => setScannerActive(true)} className="w-full" size="lg">
                 <Camera className="w-4 h-4 mr-2" />
-                Start Scanner
+                Start Camera Scanner
               </Button>
             )}
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t"></div>
+                <div className="w-full border-t" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-background text-muted-foreground">Or enter ISBN manually</span>
+                <span className="px-2 bg-background text-muted-foreground">Or enter ISBN to look up</span>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="isbn">ISBN</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="isbn"
-                  placeholder="e.g. 9789861371955"
-                  value={isbn}
-                  onChange={(e) => setIsbn(e.target.value)}
-                />
-                <Button onClick={() => handleLookup(isbn)} disabled={!isbn || loading}>
-                  {loading ? <Spinner className="w-4 h-4" /> : "Lookup"}
-                </Button>
+            <div className="flex gap-2">
+              <Input
+                placeholder="e.g. 9789861371955"
+                value={isbn}
+                onChange={(e) => setIsbn(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && isbn && !loading && handleLookup(isbn)}
+              />
+              <Button onClick={() => handleLookup(isbn)} disabled={!isbn || loading} className="shrink-0">
+                {loading ? <Spinner className="w-4 h-4" /> : "Look Up"}
+              </Button>
+            </div>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-background text-muted-foreground">Or add without ISBN</span>
               </div>
             </div>
+
+            <Button variant="outline" className="w-full" size="lg" onClick={handleAddManually}>
+              <PenLine className="w-4 h-4 mr-2" />
+              Add Book Manually
+            </Button>
           </CardContent>
         </Card>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>Confirm Book Details</CardTitle>
-            <CardDescription>Review and edit the book information before saving</CardDescription>
+            <CardTitle>
+              {bookData === "manual" ? "Add Book Manually" :
+               bookData === "notfound" ? "Book Not Found — Enter Details" :
+               "Confirm Book Details"}
+            </CardTitle>
+            <CardDescription>
+              {bookData === "manual" ? "Fill in all the book information below" :
+               bookData === "notfound" ? "This ISBN wasn't found in the database. Please fill in the details yourself." :
+               "Review and edit the book information before saving"}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -337,7 +377,8 @@ export default function ScanAdd() {
                     }}
                   >
                     {uploadingCover ? <Spinner className="w-8 h-8 mb-2" /> : <Upload className="w-8 h-8 mb-2 text-muted-foreground" />}
-                    <span className="text-sm">{uploadingCover ? "Uploading to cloud..." : "Upload Cover"}</span>
+                    <span className="text-sm">{uploadingCover ? "Uploading to cloud..." : "Upload Cover Photo"}</span>
+                    <span className="text-xs text-muted-foreground mt-1">Optional</span>
                   </Button>
                 )}
               </div>
@@ -346,21 +387,33 @@ export default function ScanAdd() {
               <div className="md:col-span-2 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="title">Title *</Label>
+                    <Label htmlFor="isbn-field">ISBN</Label>
+                    <Input
+                      id="isbn-field"
+                      placeholder="e.g. 9789888903245"
+                      value={formData.isbn}
+                      onChange={(e) => setFormData({ ...formData, isbn: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="title">Title <span className="text-destructive">*</span></Label>
                     <Input
                       id="title"
+                      placeholder="Book title"
                       value={formData.title}
                       onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                     />
                   </div>
-                  <div>
-                    <Label htmlFor="authors">Authors</Label>
-                    <Input
-                      id="authors"
-                      value={formData.authors}
-                      onChange={(e) => setFormData({ ...formData, authors: e.target.value })}
-                    />
-                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="authors">Authors</Label>
+                  <Input
+                    id="authors"
+                    placeholder="e.g. John Smith, Jane Doe"
+                    value={formData.authors}
+                    onChange={(e) => setFormData({ ...formData, authors: e.target.value })}
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -368,6 +421,7 @@ export default function ScanAdd() {
                     <Label htmlFor="publisher">Publisher</Label>
                     <Input
                       id="publisher"
+                      placeholder="Publisher name"
                       value={formData.publisher}
                       onChange={(e) => setFormData({ ...formData, publisher: e.target.value })}
                     />
@@ -376,6 +430,7 @@ export default function ScanAdd() {
                     <Label htmlFor="year">Published Year</Label>
                     <Input
                       id="year"
+                      placeholder="e.g. 2023"
                       value={formData.published_year}
                       onChange={(e) => setFormData({ ...formData, published_year: e.target.value })}
                     />
@@ -384,9 +439,10 @@ export default function ScanAdd() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="genre">Genre</Label>
+                    <Label htmlFor="genre">Genre / Category</Label>
                     <Input
                       id="genre"
+                      placeholder="e.g. Fiction, History"
                       value={formData.genre}
                       onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
                     />
@@ -395,6 +451,7 @@ export default function ScanAdd() {
                     <Label htmlFor="language">Language</Label>
                     <Input
                       id="language"
+                      placeholder="e.g. en, zh, fr"
                       value={formData.language}
                       onChange={(e) => setFormData({ ...formData, language: e.target.value })}
                     />
@@ -407,6 +464,7 @@ export default function ScanAdd() {
                     <Input
                       id="pages"
                       type="number"
+                      placeholder="e.g. 320"
                       value={formData.page_count}
                       onChange={(e) => setFormData({ ...formData, page_count: e.target.value })}
                     />
@@ -417,6 +475,7 @@ export default function ScanAdd() {
                       id="price"
                       type="number"
                       step="0.01"
+                      placeholder="e.g. 98.00"
                       value={formData.purchase_price}
                       onChange={(e) => setFormData({ ...formData, purchase_price: e.target.value })}
                     />
@@ -425,9 +484,12 @@ export default function ScanAdd() {
 
                 <div>
                   <Label htmlFor="shelf">Shelf Location</Label>
-                  <Select value={formData.shelf_location_id} onValueChange={(v) => setFormData({ ...formData, shelf_location_id: v })}>
+                  <Select
+                    value={formData.shelf_location_id}
+                    onValueChange={(v) => setFormData({ ...formData, shelf_location_id: v })}
+                  >
                     <SelectTrigger id="shelf">
-                      <SelectValue placeholder="Select a shelf" />
+                      <SelectValue placeholder="Select a shelf (optional)" />
                     </SelectTrigger>
                     <SelectContent>
                       {shelves.data?.map((shelf) => (
@@ -440,9 +502,10 @@ export default function ScanAdd() {
                 </div>
 
                 <div>
-                  <Label htmlFor="description">Description</Label>
+                  <Label htmlFor="description">Description / Notes</Label>
                   <Textarea
                     id="description"
+                    placeholder="Brief description or personal notes about this book"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     rows={3}
@@ -451,21 +514,13 @@ export default function ScanAdd() {
               </div>
             </div>
 
-            <div className="flex gap-2 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setBookData(null);
-                  setIsbn("");
-                  setFormData({});
-                  setCoverImage(null);
-                }}
-              >
+            <div className="flex gap-2 pt-4 border-t">
+              <Button variant="outline" onClick={handleReset}>
                 Cancel
               </Button>
               <Button onClick={handleSave} disabled={createBook.isPending} className="flex-1">
                 {createBook.isPending ? <Spinner className="w-4 h-4 mr-2" /> : null}
-                Save Book
+                Save to Library
               </Button>
             </div>
           </CardContent>
