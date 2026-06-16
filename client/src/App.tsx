@@ -11,6 +11,7 @@ import MyLibrary from "./pages/MyLibrary";
 import ShelfLocations from "./pages/ShelfLocations";
 import Stats from "./pages/Stats";
 import BookDetail from "./pages/BookDetail";
+import Loans from "./pages/Loans";
 
 function Router() {
   return (
@@ -21,6 +22,7 @@ function Router() {
       <Route path={"/app/library"} component={() => <DashboardLayout><MyLibrary /></DashboardLayout>} />
       <Route path={"/app/shelves"} component={() => <DashboardLayout><ShelfLocations /></DashboardLayout>} />
       <Route path={"/app/stats"} component={() => <DashboardLayout><Stats /></DashboardLayout>} />
+      <Route path={"/app/loans"} component={() => <DashboardLayout><Loans /></DashboardLayout>} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>

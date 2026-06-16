@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useCallback } from "react";
 import { useLocation, useParams } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,32 @@ export default function BookDetail() {
   const [formData, setFormData] = useState<any>({});
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const uploadCover = trpc.books.uploadCover.useMutation();
+
+  const handleCoverFileSelect = useCallback(async (file: File) => {
+    if (!file) return;
+    setUploadingCover(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+      const base64 = btoa(Array.from(uint8).map((b) => String.fromCharCode(b)).join(""));
+      const result = await uploadCover.mutateAsync({ base64, mimeType: file.type || "image/jpeg" });
+      setCoverImage(result.url);
+      setFormData((prev: any) => ({ ...prev, cover_url: result.url }));
+      toast.success("Cover uploaded to cloud storage");
+    } catch {
+      toast.error("Cover upload failed — using local preview");
+      const reader = new FileReader();
+      reader.onload = (e: any) => {
+        setCoverImage(e.target.result);
+        setFormData((prev: any) => ({ ...prev, cover_url: e.target.result }));
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setUploadingCover(false);
+    }
+  }, [uploadCover]);
 
   // Initialize form data when book loads
   if (book.data && Object.keys(formData).length === 0) {
@@ -122,24 +149,17 @@ export default function BookDetail() {
                     <Button
                       variant="outline"
                       className="w-full"
+                      disabled={uploadingCover}
                       onClick={() => {
                         const input = document.createElement("input");
                         input.type = "file";
                         input.accept = "image/*";
-                        input.onchange = (e: any) => {
-                          const file = e.target.files[0];
-                          const reader = new FileReader();
-                          reader.onload = (event: any) => {
-                            setCoverImage(event.target.result);
-                            setFormData({ ...formData, cover_url: event.target.result });
-                          };
-                          reader.readAsDataURL(file);
-                        };
+                        input.onchange = (e: any) => handleCoverFileSelect(e.target.files[0]);
                         input.click();
                       }}
                     >
-                      <Upload className="w-4 h-4 mr-2" />
-                      Change Cover
+                      {uploadingCover ? <Spinner className="w-4 h-4 mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
+                      {uploadingCover ? "Uploading..." : "Change Cover"}
                     </Button>
                   )}
                 </div>
@@ -148,24 +168,17 @@ export default function BookDetail() {
                   <Button
                     variant="outline"
                     className="w-full h-64 flex flex-col items-center justify-center"
+                    disabled={uploadingCover}
                     onClick={() => {
                       const input = document.createElement("input");
                       input.type = "file";
                       input.accept = "image/*";
-                      input.onchange = (e: any) => {
-                        const file = e.target.files[0];
-                        const reader = new FileReader();
-                        reader.onload = (event: any) => {
-                          setCoverImage(event.target.result);
-                          setFormData({ ...formData, cover_url: event.target.result });
-                        };
-                        reader.readAsDataURL(file);
-                      };
+                      input.onchange = (e: any) => handleCoverFileSelect(e.target.files[0]);
                       input.click();
                     }}
                   >
-                    <Upload className="w-8 h-8 mb-2 text-muted-foreground" />
-                    <span className="text-sm">Upload Cover</span>
+                    {uploadingCover ? <Spinner className="w-8 h-8 mb-2" /> : <Upload className="w-8 h-8 mb-2 text-muted-foreground" />}
+                    <span className="text-sm">{uploadingCover ? "Uploading to cloud..." : "Upload Cover"}</span>
                   </Button>
                 )
               )}

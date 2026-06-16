@@ -360,3 +360,126 @@ export async function upsertUser(user: {
     }
   }
 }
+
+/**
+ * ============ LOAN TRACKER ============
+ */
+export interface LoanRecord {
+  id: number;
+  book_id: number;
+  borrower_name: string;
+  borrower_contact: string | null;
+  lent_date: string;
+  due_date: string | null;
+  returned_date: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  books?: Book;
+}
+
+export async function createLoan(loan: {
+  book_id: number;
+  borrower_name: string;
+  borrower_contact?: string;
+  lent_date?: string;
+  due_date?: string;
+  notes?: string;
+}): Promise<LoanRecord | null> {
+  const { data, error } = await supabaseAdmin
+    .from("loan_records")
+    .insert([{
+      book_id: loan.book_id,
+      borrower_name: loan.borrower_name,
+      borrower_contact: loan.borrower_contact || null,
+      lent_date: loan.lent_date || new Date().toISOString(),
+      due_date: loan.due_date || null,
+      notes: loan.notes || null,
+    }])
+    .select(`*, books:book_id (*)`)
+    .single();
+  if (error) {
+    console.error("[DB] Error creating loan:", error);
+    return null;
+  }
+  return data;
+}
+
+export async function returnLoan(id: number): Promise<LoanRecord | null> {
+  const { data, error } = await supabaseAdmin
+    .from("loan_records")
+    .update({ returned_date: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select(`*, books:book_id (*)`)
+    .single();
+  if (error) {
+    console.error("[DB] Error returning loan:", error);
+    return null;
+  }
+  return data;
+}
+
+export async function listLoans(activeOnly = false): Promise<LoanRecord[]> {
+  let query = supabaseAdmin
+    .from("loan_records")
+    .select(`*, books:book_id (*)`)
+    .order("lent_date", { ascending: false });
+  if (activeOnly) {
+    query = (query as any).is("returned_date", null);
+  }
+  const { data, error } = await query;
+  if (error) {
+    console.error("[DB] Error listing loans:", error);
+    return [];
+  }
+  return data || [];
+}
+
+export async function deleteLoan(id: number): Promise<boolean> {
+  const { error } = await supabaseAdmin.from("loan_records").delete().eq("id", id);
+  if (error) {
+    console.error("[DB] Error deleting loan:", error);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * ============ STATS CHARTS ============
+ */
+export async function getBooksByGenre(): Promise<{ genre: string; count: number }[]> {
+  const { data, error } = await supabaseAdmin.from("books").select("genre");
+  if (error) {
+    console.error("[DB] Error getting genre stats:", error);
+    return [];
+  }
+  const counts: Record<string, number> = {};
+  for (const row of data || []) {
+    const g = row.genre || "Unknown";
+    counts[g] = (counts[g] || 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([genre, count]) => ({ genre, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+export async function getBooksByMonth(): Promise<{ month: string; count: number }[]> {
+  const { data, error } = await supabaseAdmin
+    .from("books")
+    .select("date_added")
+    .order("date_added", { ascending: true });
+  if (error) {
+    console.error("[DB] Error getting monthly stats:", error);
+    return [];
+  }
+  const counts: Record<string, number> = {};
+  for (const row of data || []) {
+    if (!row.date_added) continue;
+    const d = new Date(row.date_added);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([month, count]) => ({ month, count }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+}

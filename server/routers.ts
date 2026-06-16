@@ -5,18 +5,17 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { lookupBookByISBN } from "./bookLookup";
+import { supabaseAdmin } from "./supabase";
+import { storagePut } from "./storage";
 
 export const appRouter = router({
-    // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
+      return { success: true } as const;
     }),
   }),
 
@@ -33,24 +32,17 @@ export const appRouter = router({
     }),
 
     search: publicProcedure.input(z.object({ query: z.string() })).query(async ({ input }) => {
-      if (!input.query.trim()) {
-        return await db.getAllBooks();
-      }
+      if (!input.query.trim()) return await db.getAllBooks();
       return await db.searchBooks(input.query);
     }),
 
     filter: publicProcedure
-      .input(
-        z.object({
-          genre: z.string().optional(),
-          shelfLocationId: z.number().optional(),
-        })
-      )
+      .input(z.object({
+        genre: z.string().optional(),
+        shelfLocationId: z.number().optional(),
+      }))
       .query(async ({ input }) => {
-        return await db.filterBooks({
-          genre: input.genre,
-          shelfLocationId: input.shelfLocationId,
-        });
+        return await db.filterBooks({ genre: input.genre, shelfLocationId: input.shelfLocationId });
       }),
 
     lookup: publicProcedure
@@ -60,44 +52,40 @@ export const appRouter = router({
       }),
 
     create: protectedProcedure
-      .input(
-        z.object({
-          isbn: z.string().optional(),
-          title: z.string().min(1),
-          authors: z.string().optional(),
-          cover_url: z.string().optional(),
-          publisher: z.string().optional(),
-          published_year: z.string().optional(),
-          genre: z.string().optional(),
-          description: z.string().optional(),
-          page_count: z.number().optional(),
-          language: z.string().optional(),
-          purchase_price: z.number().optional(),
-          shelf_location_id: z.number().optional(),
-        })
-      )
+      .input(z.object({
+        isbn: z.string().optional(),
+        title: z.string().min(1),
+        authors: z.string().optional(),
+        cover_url: z.string().optional(),
+        publisher: z.string().optional(),
+        published_year: z.string().optional(),
+        genre: z.string().optional(),
+        description: z.string().optional(),
+        page_count: z.number().optional(),
+        language: z.string().optional(),
+        purchase_price: z.number().optional(),
+        shelf_location_id: z.number().optional(),
+      }))
       .mutation(async ({ input }) => {
         return await db.createBook(input);
       }),
 
     update: protectedProcedure
-      .input(
-        z.object({
-          id: z.number(),
-          isbn: z.string().optional(),
-          title: z.string().optional(),
-          authors: z.string().optional(),
-          cover_url: z.string().optional(),
-          publisher: z.string().optional(),
-          published_year: z.string().optional(),
-          genre: z.string().optional(),
-          description: z.string().optional(),
-          page_count: z.number().optional(),
-          language: z.string().optional(),
-          purchase_price: z.number().optional(),
-          shelf_location_id: z.number().optional(),
-        })
-      )
+      .input(z.object({
+        id: z.number(),
+        isbn: z.string().optional(),
+        title: z.string().optional(),
+        authors: z.string().optional(),
+        cover_url: z.string().optional(),
+        publisher: z.string().optional(),
+        published_year: z.string().optional(),
+        genre: z.string().optional(),
+        description: z.string().optional(),
+        page_count: z.number().optional(),
+        language: z.string().optional(),
+        purchase_price: z.number().optional(),
+        shelf_location_id: z.number().optional(),
+      }))
       .mutation(async ({ input }) => {
         const { id, ...updates } = input;
         return await db.updateBook(id, updates);
@@ -107,6 +95,23 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         return await db.deleteBook(input.id);
+      }),
+
+    /** Upload a cover image (base64) to Supabase Storage and return the URL */
+    uploadCover: protectedProcedure
+      .input(z.object({
+        base64: z.string(),
+        mimeType: z.string().default("image/jpeg"),
+        bookId: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        // Decode base64 to buffer
+        const base64Data = input.base64.replace(/^data:[^;]+;base64,/, "");
+        const buffer = Buffer.from(base64Data, "base64");
+        const ext = input.mimeType.split("/")[1] || "jpg";
+        const key = `covers/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const { url } = await storagePut(key, buffer, input.mimeType);
+        return { url, key };
       }),
   }),
 
@@ -119,24 +124,13 @@ export const appRouter = router({
     }),
 
     create: protectedProcedure
-      .input(
-        z.object({
-          name: z.string().min(1),
-          description: z.string().optional(),
-        })
-      )
+      .input(z.object({ name: z.string().min(1), description: z.string().optional() }))
       .mutation(async ({ input }) => {
         return await db.createShelfLocation(input.name, input.description);
       }),
 
     update: protectedProcedure
-      .input(
-        z.object({
-          id: z.number(),
-          name: z.string().min(1),
-          description: z.string().optional(),
-        })
-      )
+      .input(z.object({ id: z.number(), name: z.string().min(1), description: z.string().optional() }))
       .mutation(async ({ input }) => {
         return await db.updateShelfLocation(input.id, input.name, input.description);
       }),
@@ -155,6 +149,50 @@ export const appRouter = router({
     overview: publicProcedure.query(async () => {
       return await db.getBookStats();
     }),
+
+    byGenre: publicProcedure.query(async () => {
+      return await db.getBooksByGenre();
+    }),
+
+    byMonth: publicProcedure.query(async () => {
+      return await db.getBooksByMonth();
+    }),
+  }),
+
+  /**
+   * ============ LOAN TRACKER ============
+   */
+  loans: router({
+    list: publicProcedure
+      .input(z.object({ activeOnly: z.boolean().optional() }))
+      .query(async ({ input }) => {
+        return await db.listLoans(input.activeOnly ?? false);
+      }),
+
+    lend: protectedProcedure
+      .input(z.object({
+        book_id: z.number(),
+        borrower_name: z.string().min(1),
+        borrower_contact: z.string().optional(),
+        lent_date: z.string().optional(),
+        due_date: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return await db.createLoan(input);
+      }),
+
+    return: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return await db.returnLoan(input.id);
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return await db.deleteLoan(input.id);
+      }),
   }),
 });
 

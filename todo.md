@@ -49,3 +49,18 @@
 - [x] GitHub repository initialization (kingtmc314/home-library)
 - [x] Vercel deployment (home-library-kingtmc314s-projects.vercel.app)
 - [x] Final checkpoint and delivery
+
+## Round 2 Features
+
+- [x] Create loan_records table in Supabase
+- [x] tRPC routes: loans.lend, loans.return, loans.list, loans.listActive
+- [x] tRPC routes: stats.byGenre, stats.byMonth
+- [x] Loans page in sidebar with active/overdue loans list
+- [x] Lend Book button on book detail and library grid
+- [x] Genre breakdown pie chart on Stats page (Recharts)
+- [x] Monthly additions bar chart on Stats page (Recharts)
+- [x] Manus S3 cloud storage for book cover uploads (storagePut)
+- [x] Server tRPC route for cover upload to Manus S3 storage
+- [x] Replace base64 cover upload with cloud storage URL
+- [x] Tests for loan tracker routes (27 tests passing)
+- [x] Checkpoint, GitHub push, Vercel redeploy
