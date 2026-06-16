@@ -284,7 +284,7 @@ export async function getUserByOpenId(openId: string): Promise<User | undefined>
     .from("users")
     .select("*")
     .eq("openId", openId)
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error("[DB] Error fetching user:", error);
@@ -300,9 +300,9 @@ export async function getUserByOpenId(openId: string): Promise<User | undefined>
     email: data.email,
     loginMethod: data.loginMethod,
     role: data.role,
-    createdAt: new Date(data.created_at),
-    updatedAt: new Date(data.updated_at),
-    lastSignedIn: new Date(data.last_signed_in),
+    createdAt: new Date(data.createdAt),
+    updatedAt: new Date(data.updatedAt),
+    lastSignedIn: new Date(data.lastSignedIn),
   };
 }
 
@@ -323,13 +323,13 @@ export async function upsertUser(user: {
   if (existingUser) {
     // Update existing user
     const updates: any = {
-      updated_at: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
     if (user.name !== undefined) updates.name = user.name;
     if (user.email !== undefined) updates.email = user.email;
     if (user.loginMethod !== undefined) updates.loginMethod = user.loginMethod;
-    if (user.lastSignedIn !== undefined) updates.last_signed_in = user.lastSignedIn.toISOString();
+    if (user.lastSignedIn !== undefined) updates.lastSignedIn = user.lastSignedIn.toISOString();
     if (user.role !== undefined) updates.role = user.role;
 
     const { error } = await supabaseAdmin
@@ -350,7 +350,7 @@ export async function upsertUser(user: {
         email: user.email || null,
         loginMethod: user.loginMethod || null,
         role: user.role || "user",
-        last_signed_in: user.lastSignedIn?.toISOString() || new Date().toISOString(),
+        lastSignedIn: user.lastSignedIn?.toISOString() || new Date().toISOString(),
       },
     ]);
 

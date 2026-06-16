@@ -16,20 +16,11 @@ function Router() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
-      <Route path={"/app/*"}>
-        {() => (
-          <DashboardLayout>
-            <Switch>
-              <Route path={"/scan"} component={ScanAdd} />
-              <Route path={"/library"} component={MyLibrary} />
-              <Route path={"/library/:id"} component={BookDetail} />
-              <Route path={"/shelves"} component={ShelfLocations} />
-              <Route path={"/stats"} component={Stats} />
-              <Route component={NotFound} />
-            </Switch>
-          </DashboardLayout>
-        )}
-      </Route>
+      <Route path={"/app/scan"} component={() => <DashboardLayout><ScanAdd /></DashboardLayout>} />
+      <Route path={"/app/library/:id"} component={() => <DashboardLayout><BookDetail /></DashboardLayout>} />
+      <Route path={"/app/library"} component={() => <DashboardLayout><MyLibrary /></DashboardLayout>} />
+      <Route path={"/app/shelves"} component={() => <DashboardLayout><ShelfLocations /></DashboardLayout>} />
+      <Route path={"/app/stats"} component={() => <DashboardLayout><Stats /></DashboardLayout>} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>

@@ -42,10 +42,10 @@
 - [x] Stats page: total book count, total shelf count
 
 ## Phase 7: Polish & Tests
-- [ ] Vitest tests for books and shelves routers
-- [ ] Loading skeletons and empty states
-- [ ] Error handling for API failures and scanner errors
-- [ ] Mobile-responsive layout verification
-- [ ] GitHub repository initialization
-- [ ] Vercel deployment
-- [ ] Final checkpoint and delivery
+- [x] Vitest tests for books and shelves routers
+- [x] Loading skeletons and empty states
+- [x] Error handling for API failures and scanner errors
+- [x] Mobile-responsive layout verification
+- [x] GitHub repository initialization (kingtmc314/home-library)
+- [x] Vercel deployment (home-library-kingtmc314s-projects.vercel.app)
+- [x] Final checkpoint and delivery
