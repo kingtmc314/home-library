@@ -1,17 +1,15 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import {
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar,
+  decimal,
+} from "drizzle-orm/mysql-core";
 
-/**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
- */
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -25,4 +23,37 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+export const shelfLocations = mysqlTable("shelf_locations", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ShelfLocation = typeof shelfLocations.$inferSelect;
+export type InsertShelfLocation = typeof shelfLocations.$inferInsert;
+
+export const books = mysqlTable("books", {
+  id: int("id").autoincrement().primaryKey(),
+  isbn: varchar("isbn", { length: 20 }),
+  title: varchar("title", { length: 512 }).notNull(),
+  authors: text("authors"), // JSON array stored as string
+  coverUrl: text("coverUrl"),
+  publisher: varchar("publisher", { length: 255 }),
+  publishedYear: varchar("publishedYear", { length: 10 }),
+  genre: varchar("genre", { length: 128 }),
+  description: text("description"),
+  pageCount: int("pageCount"),
+  language: varchar("language", { length: 64 }),
+  purchasePrice: decimal("purchasePrice", { precision: 10, scale: 2 }),
+  shelfLocationId: int("shelfLocationId").references(() => shelfLocations.id, {
+    onDelete: "set null",
+  }),
+  dateAdded: timestamp("dateAdded").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Book = typeof books.$inferSelect;
+export type InsertBook = typeof books.$inferInsert;
