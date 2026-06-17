@@ -64,3 +64,12 @@
 - [x] Replace base64 cover upload with cloud storage URL
 - [x] Tests for loan tracker routes (27 tests passing)
 - [x] Checkpoint, GitHub push, Vercel redeploy
+
+## Round 3 Features
+
+- [x] Add manual book entry (Add Book Manually button — no ISBN needed)
+- [x] Improved ISBN lookup error handling (quota/not-found messages + auto-open form)
+- [x] Google Books API key support (optional, via GOOGLE_BOOKS_API_KEY env var)
+- [x] Douban Books scraping fallback for Chinese/mainland books (no key needed)
+- [x] Open Library as 3rd fallback
+- [x] Lookup chain: Google Books → Douban → Open Library → Manual entry
