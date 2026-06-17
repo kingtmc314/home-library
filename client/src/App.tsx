@@ -13,6 +13,8 @@ import Stats from "./pages/Stats";
 import BookDetail from "./pages/BookDetail";
 import Loans from "./pages/Loans";
 import EBooks from "./pages/EBooks";
+import CSVImport from "./pages/CSVImport";
+import BulkPDFUpload from "./pages/BulkPDFUpload";
 
 function Router() {
   return (
@@ -25,6 +27,8 @@ function Router() {
       <Route path={"/app/stats"} component={() => <DashboardLayout><Stats /></DashboardLayout>} />
       <Route path={"/app/loans"} component={() => <DashboardLayout><Loans /></DashboardLayout>} />
       <Route path={"/app/ebooks"} component={() => <DashboardLayout><EBooks /></DashboardLayout>} />
+      <Route path={"/app/csv-import"} component={() => <DashboardLayout><CSVImport /></DashboardLayout>} />
+      <Route path={"/app/bulk-pdf"} component={() => <DashboardLayout><BulkPDFUpload /></DashboardLayout>} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>

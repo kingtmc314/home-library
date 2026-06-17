@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useLocation, useParams } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { ArrowLeft, Upload, FileText, Download, Trash2, BookOpen } from "lucide-react";
+import { ArrowLeft, Upload, FileText, Download, Trash2, BookOpen, Eye, BookOpenCheck } from "lucide-react";
+import { PDFViewerModal } from "@/components/PDFViewerModal";
+import { Progress } from "@/components/ui/progress";
 
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -58,6 +60,16 @@ export default function BookDetail() {
       toast.success("File removed");
     },
   });
+
+  const [viewerFile, setViewerFile] = React.useState<{ url: string; name: string } | null>(null);
+
+  const updateReadingStatus = trpc.reading.updateStatus.useMutation({
+    onSuccess: () => {
+      book.refetch();
+      toast.success("Reading status updated");
+    },
+  });
+  const [readingPage, setReadingPage] = useState<string>("");
 
   const [formData, setFormData] = useState<any>({});
   const [coverImage, setCoverImage] = useState<string | null>(null);
@@ -183,6 +195,7 @@ export default function BookDetail() {
   }
 
   return (
+    <>
     <div className="space-y-6">
       <Button variant="outline" onClick={() => navigate("/app/library")}>
         <ArrowLeft className="w-4 h-4 mr-2" />
@@ -441,6 +454,84 @@ export default function BookDetail() {
         </CardContent>
       </Card>
 
+      {/* ===== READING STATUS SECTION ===== */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BookOpenCheck className="w-5 h-5" />
+            Reading Status
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {(['unread', 'reading', 'finished'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => updateReadingStatus.mutate({ id: bookId, status: s })}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                  (book.data?.reading_status ?? 'unread') === s
+                    ? s === 'reading' ? 'bg-blue-500 text-white border-blue-500'
+                      : s === 'finished' ? 'bg-green-500 text-white border-green-500'
+                      : 'bg-muted text-foreground border-border'
+                    : 'bg-transparent text-muted-foreground border-border hover:bg-muted'
+                }`}
+              >
+                {s === 'unread' ? '📚 Unread' : s === 'reading' ? '📖 Reading' : '✅ Finished'}
+              </button>
+            ))}
+          </div>
+          {(book.data?.reading_status === 'reading' || book.data?.reading_status === 'finished') && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-muted-foreground w-24">Current page</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={book.data?.total_pages || book.data?.page_count || 9999}
+                  value={readingPage !== '' ? readingPage : (book.data?.current_page ?? 0)}
+                  onChange={(e) => setReadingPage(e.target.value)}
+                  onBlur={() => {
+                    const p = parseInt(readingPage);
+                    if (!isNaN(p)) {
+                      updateReadingStatus.mutate({
+                        id: bookId,
+                        status: book.data?.reading_status as any,
+                        currentPage: p,
+                        totalPages: book.data?.total_pages || book.data?.page_count || undefined,
+                      });
+                      setReadingPage('');
+                    }
+                  }}
+                  className="w-24 h-8 px-2 text-sm border rounded-md bg-background"
+                />
+                {(book.data?.total_pages || book.data?.page_count) && (
+                  <span className="text-sm text-muted-foreground">
+                    of {book.data?.total_pages || book.data?.page_count}
+                  </span>
+                )}
+              </div>
+              {(book.data?.total_pages || book.data?.page_count) && (
+                <div className="space-y-1">
+                  <Progress
+                    value={Math.round(
+                      ((book.data?.current_page ?? 0) /
+                        (book.data?.total_pages || book.data?.page_count || 1)) * 100
+                    )}
+                    className="h-2"
+                  />
+                  <p className="text-xs text-muted-foreground text-right">
+                    {Math.round(
+                      ((book.data?.current_page ?? 0) /
+                        (book.data?.total_pages || book.data?.page_count || 1)) * 100
+                    )}% complete
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* ===== E-BOOK / PDF FILES SECTION ===== */}
       <Card>
         <CardHeader>
@@ -498,6 +589,14 @@ export default function BookDetail() {
                       size="sm"
                       variant="ghost"
                       className="h-8 w-8 p-0"
+                      onClick={() => setViewerFile({ url: file.file_url, name: file.file_name })}
+                    >
+                      <Eye className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 w-8 p-0"
                       asChild
                     >
                       <a href={file.file_url} download={file.file_name} target="_blank" rel="noopener noreferrer">
@@ -527,5 +626,15 @@ export default function BookDetail() {
         </CardContent>
       </Card>
     </div>
+
+    {viewerFile && (
+      <PDFViewerModal
+        open={!!viewerFile}
+        onClose={() => setViewerFile(null)}
+        fileUrl={viewerFile.url}
+        fileName={viewerFile.name}
+      />
+    )}
+    </>
   );
 }

@@ -7,7 +7,13 @@ import {
   BookMarked,
   TrendingUp,
   Library,
+  BookCheck,
+  BookOpenCheck,
+  BookX,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { useLocation } from "wouter";
 import {
   PieChart,
   Pie,
@@ -88,10 +94,12 @@ const CustomBarTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function Stats() {
+  const [, navigate] = useLocation();
   const stats = trpc.stats.overview.useQuery();
   const genreStats = trpc.stats.byGenre.useQuery();
   const monthlyStats = trpc.stats.byMonth.useQuery();
   const loans = trpc.loans.list.useQuery({ activeOnly: false });
+  const readingStats = trpc.reading.stats.useQuery();
 
   const isLoading = stats.isLoading || genreStats.isLoading || monthlyStats.isLoading;
 
@@ -259,6 +267,90 @@ export default function Stats() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Reading Status Section */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <StatCard
+          title="Currently Reading"
+          value={readingStats.data?.reading ?? 0}
+          description="Books in progress"
+          icon={BookOpenCheck}
+          color="text-blue-500"
+        />
+        <StatCard
+          title="Finished"
+          value={readingStats.data?.finished ?? 0}
+          description="Books completed"
+          icon={BookCheck}
+          color="text-green-600"
+        />
+        <StatCard
+          title="Unread"
+          value={readingStats.data?.unread ?? 0}
+          description="Not started yet"
+          icon={BookX}
+          color="text-muted-foreground"
+        />
+      </div>
+
+      {/* Currently Reading List */}
+      {readingStats.data && readingStats.data.currentlyReading.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <BookOpenCheck className="w-4 h-4 text-blue-500" />
+              Currently Reading
+            </CardTitle>
+            <CardDescription>Books you are actively reading</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {readingStats.data.currentlyReading.map((book) => {
+                const current = book.current_page ?? 0;
+                const total = book.total_pages ?? book.page_count ?? 0;
+                const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+                return (
+                  <div
+                    key={book.id}
+                    className="flex items-start gap-3 p-3 rounded-lg border hover:bg-muted/30 cursor-pointer transition-colors"
+                    onClick={() => navigate(`/app/books/${book.id}`)}
+                  >
+                    {book.cover_url ? (
+                      <img src={book.cover_url} alt={book.title} className="w-10 h-14 object-cover rounded shrink-0" />
+                    ) : (
+                      <div className="w-10 h-14 bg-muted rounded shrink-0 flex items-center justify-center">
+                        <BookOpen className="w-5 h-5 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{book.title}</p>
+                      {book.authors && (
+                        <p className="text-xs text-muted-foreground truncate">{book.authors}</p>
+                      )}
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">
+                            {total > 0 ? `Page ${current} of ${total}` : "In progress"}
+                          </span>
+                          {total > 0 && (
+                            <span className="text-xs font-medium text-blue-500">{pct}%</span>
+                          )}
+                        </div>
+                        {total > 0 && (
+                          <Progress value={pct} className="h-1.5" />
+                        )}
+                      </div>
+                      {book.genre && (
+                        <Badge variant="outline" className="mt-1 text-xs py-0 h-4">{book.genre}</Badge>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Genre breakdown table */}
       {genreData.length > 0 && (

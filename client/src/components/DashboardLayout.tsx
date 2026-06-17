@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { Camera, BookOpen, Boxes, BarChart3, LogOut, PanelLeft, BookMarked, FileText } from "lucide-react";
+import { Camera, BookOpen, Boxes, BarChart3, LogOut, PanelLeft, BookMarked, FileText, Upload, TableProperties } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -34,6 +34,8 @@ const menuItems = [
   { icon: BarChart3, label: "Stats", path: "/app/stats" },
   { icon: BookMarked, label: "Loan Tracker", path: "/app/loans" },
   { icon: FileText, label: "E-Books", path: "/app/ebooks" },
+  { icon: Upload, label: "Bulk PDF Upload", path: "/app/bulk-pdf" },
+  { icon: TableProperties, label: "CSV Import", path: "/app/csv-import" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";

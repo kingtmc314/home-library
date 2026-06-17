@@ -112,6 +112,38 @@ export const appRouter = router({
         const { url } = await storagePut(key, buffer, input.mimeType);
         return { url, key };
       }),
+
+    /** Bulk import books from CSV rows */
+    csvImport: protectedProcedure
+      .input(z.array(z.object({
+        title: z.string().min(1),
+        authors: z.string().optional(),
+        isbn: z.string().optional(),
+        publisher: z.string().optional(),
+        published_year: z.number().optional(),
+        genre: z.string().optional(),
+        language: z.string().optional(),
+        page_count: z.number().optional(),
+        purchase_price: z.number().optional(),
+        shelf_location_id: z.number().optional(),
+        description: z.string().optional(),
+        cover_url: z.string().optional(),
+      })))
+      .mutation(async ({ input }) => {
+        const results: { success: boolean; title: string; error?: string }[] = [];
+        for (const row of input) {
+          try {
+            await db.createBook({
+              ...row,
+              published_year: row.published_year !== undefined ? String(row.published_year) : undefined,
+            });
+            results.push({ success: true, title: row.title });
+          } catch (err: any) {
+            results.push({ success: false, title: row.title, error: err.message });
+          }
+        }
+        return results;
+      }),
   }),
 
   /**
@@ -195,6 +227,31 @@ export const appRouter = router({
   }),
 
   /**
+   * ============ READING STATUS ============
+   */
+  reading: router({
+    updateStatus: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(['unread', 'reading', 'finished']),
+        currentPage: z.number().optional(),
+        totalPages: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return await db.updateReadingStatus(
+          input.id,
+          input.status,
+          input.currentPage,
+          input.totalPages
+        );
+      }),
+
+    stats: publicProcedure.query(async () => {
+      return await db.getReadingStats();
+    }),
+  }),
+
+  /**
    * ============ BOOK FILES (PDF / E-BOOKS) ============
    */
   files: router({
@@ -246,6 +303,84 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         return await db.getBookFile(input.id);
+      }),
+
+    /**
+     * Bulk PDF upload: upload a PDF, optionally auto-create a book record from filename/ISBN.
+     * If bookId is provided, attach to existing book.
+     * If isbn/title provided, look up metadata and create a new book, then attach.
+     */
+    bulkUpload: protectedProcedure
+      .input(z.object({
+        fileName: z.string().min(1),
+        base64: z.string(),
+        mimeType: z.string().default('application/pdf'),
+        fileSize: z.number().default(0),
+        bookId: z.number().optional(),
+        isbn: z.string().optional(),
+        title: z.string().optional(),
+        authors: z.string().optional(),
+        genre: z.string().optional(),
+        shelfLocationId: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        // 1. Determine or create the book record
+        let bookId = input.bookId;
+        let bookTitle = input.title || input.fileName.replace(/\.[^.]+$/, '');
+
+        if (!bookId) {
+          // Try to look up metadata if ISBN provided
+          let metadata: any = null;
+          if (input.isbn) {
+            try {
+              const { lookupBookByISBN } = await import('./bookLookup');
+              metadata = await lookupBookByISBN(input.isbn);
+            } catch { /* ignore lookup errors */ }
+          }
+
+          const bookData: Parameters<typeof db.createBook>[0] = {
+            isbn: input.isbn || metadata?.isbn || undefined,
+            title: metadata?.title || bookTitle,
+            authors: metadata?.authors?.join(', ') || input.authors || undefined,
+            cover_url: metadata?.coverUrl || undefined,
+            publisher: metadata?.publisher || undefined,
+            published_year: metadata?.publishedYear || undefined,
+            genre: input.genre || metadata?.genre || undefined,
+            description: metadata?.description || undefined,
+            page_count: metadata?.pageCount || undefined,
+            language: metadata?.language || undefined,
+            shelf_location_id: input.shelfLocationId || undefined,
+          };
+
+          const newBook = await db.createBook(bookData);
+          if (!newBook) throw new Error('Failed to create book record');
+          bookId = newBook.id;
+          bookTitle = newBook.title;
+        }
+
+        // 2. Upload file to storage
+        const base64Data = input.base64.replace(/^data:[^;]+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const key = `ebooks/${bookId}/${Date.now()}-${safeName}`;
+        const { url, key: storedKey } = await storagePut(key, buffer, input.mimeType);
+
+        // 3. Get book genre for auto-category
+        const book = await db.getBookById(bookId);
+        const autoCategory = book?.genre || input.genre || null;
+
+        // 4. Create file record
+        const record = await db.createBookFile({
+          book_id: bookId,
+          file_name: input.fileName,
+          file_key: storedKey,
+          file_url: url,
+          file_size: input.fileSize,
+          mime_type: input.mimeType,
+          auto_category: autoCategory || undefined,
+        });
+
+        return { file: record, bookId, bookTitle };
       }),
   }),
 });

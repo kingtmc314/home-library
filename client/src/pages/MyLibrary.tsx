@@ -171,6 +171,18 @@ export default function MyLibrary() {
                       {book.genre}
                     </Badge>
                   )}
+                  {(book as any).reading_status && (book as any).reading_status !== 'unread' && (
+                    <Badge
+                      variant="outline"
+                      className={`text-xs px-1.5 py-0 ${
+                        (book as any).reading_status === 'reading'
+                          ? 'border-blue-400 text-blue-600'
+                          : 'border-green-400 text-green-600'
+                      }`}
+                    >
+                      {(book as any).reading_status === 'reading' ? '📖 Reading' : '✅ Finished'}
+                    </Badge>
+                  )}
                 </div>
 
                 {(book as any).shelf_locations && (

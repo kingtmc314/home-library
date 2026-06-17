@@ -39,6 +39,10 @@ export interface Book {
   date_added: string;
   created_at: string;
   updated_at: string;
+  // reading status (added in Round 5)
+  reading_status: 'unread' | 'reading' | 'finished';
+  current_page: number | null;
+  total_pages: number | null;
   // joined
   shelf_locations?: ShelfLocation | null;
 }

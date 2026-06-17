@@ -85,3 +85,19 @@
 - [x] E-Books page in sidebar: browse all PDFs, filter by genre/shelf/ISBN, download
 - [x] Add E-Books nav item to DashboardLayout sidebar
 - [x] Register /app/ebooks route in App.tsx
+
+## Round 5: PDF Viewer, CSV Import, Reading Status, Bulk PDF Upload (Complete)
+
+- [x] In-browser PDF viewer modal on BookDetail page (iframe-based, Preview button)
+- [x] In-browser PDF viewer modal on EBooks page (Preview button per file)
+- [x] CSV bulk import page (upload CSV, parse, preview, save all books)
+- [x] Add reading_status column to books table in Supabase (unread/reading/finished)
+- [x] Add current_page and total_pages fields for reading progress
+- [x] tRPC route: reading.updateStatus + reading.stats
+- [x] Reading status badge on book cards in My Library grid
+- [x] Reading progress bar on BookDetail page
+- [x] Currently Reading section on Stats page
+- [x] Bulk PDF Upload page: drop multiple PDFs, parse filename for title/ISBN, auto-lookup metadata
+- [x] Auto-create book record + attach PDF in one step for each uploaded file
+- [x] Bulk upload progress UI: per-file status (looking up / saving / done / failed)
+- [x] Add CSV Import and Bulk PDF Upload nav items to sidebar

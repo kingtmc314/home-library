@@ -8,8 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { toast } from "sonner";
-import { FileText, Download, Trash2, Search, BookOpen, Filter } from "lucide-react";
+import { FileText, Download, Trash2, Search, BookOpen, Filter, Eye } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { PDFViewerModal } from "@/components/PDFViewerModal";
 
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -24,6 +25,7 @@ export default function EBooks() {
   const [search, setSearch] = useState("");
   const [filterGenre, setFilterGenre] = useState("all");
   const [filterShelf, setFilterShelf] = useState("all");
+  const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null);
 
   const files = trpc.files.list.useQuery({});
   const shelves = trpc.shelves.list.useQuery();
@@ -201,6 +203,15 @@ export default function EBooks() {
 
                     {/* Actions */}
                     <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 p-0"
+                        title="Preview"
+                        onClick={() => setViewerFile({ url: file.file_url, name: file.file_name })}
+                      >
+                        <Eye className="w-4 h-4" />
+                      </Button>
                       <Button size="sm" variant="ghost" className="h-8 w-8 p-0" asChild>
                         <a
                           href={file.file_url}
@@ -231,6 +242,16 @@ export default function EBooks() {
             );
           })}
         </div>
+      )}
+
+      {/* PDF Viewer Modal */}
+      {viewerFile && (
+        <PDFViewerModal
+          open={!!viewerFile}
+          onClose={() => setViewerFile(null)}
+          fileUrl={viewerFile.url}
+          fileName={viewerFile.name}
+        />
       )}
     </div>
   );

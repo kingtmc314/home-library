@@ -567,3 +567,60 @@ export async function getBookFile(id: number): Promise<BookFile | null> {
   }
   return data;
 }
+
+/**
+ * ============ READING STATUS ============
+ */
+export async function updateReadingStatus(
+  id: number,
+  status: 'unread' | 'reading' | 'finished',
+  currentPage?: number,
+  totalPages?: number
+): Promise<Book | null> {
+  const updates: any = {
+    reading_status: status,
+    updated_at: new Date().toISOString(),
+  };
+  if (currentPage !== undefined) updates.current_page = currentPage;
+  if (totalPages !== undefined) updates.total_pages = totalPages;
+
+  const { data, error } = await supabaseAdmin
+    .from("books")
+    .update(updates)
+    .eq("id", id)
+    .select(`*, shelf_locations:shelf_location_id (*)`)
+    .single();
+
+  if (error) {
+    console.error("[DB] Error updating reading status:", error);
+    return null;
+  }
+  return data;
+}
+
+export async function getReadingStats(): Promise<{
+  unread: number;
+  reading: number;
+  finished: number;
+  currentlyReading: Book[];
+}> {
+  const [statusResult, readingResult] = await Promise.all([
+    supabaseAdmin.from("books").select("reading_status"),
+    supabaseAdmin
+      .from("books")
+      .select(`*, shelf_locations:shelf_location_id (*)`)
+      .eq("reading_status", "reading")
+      .order("updated_at", { ascending: false }),
+  ]);
+
+  const counts = { unread: 0, reading: 0, finished: 0 };
+  for (const row of statusResult.data || []) {
+    const s = (row.reading_status || "unread") as keyof typeof counts;
+    if (s in counts) counts[s]++;
+  }
+
+  return {
+    ...counts,
+    currentlyReading: readingResult.data || [],
+  };
+}
