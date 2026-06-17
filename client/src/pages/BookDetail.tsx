@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useLocation, useParams } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,9 +7,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Spinner } from "@/components/ui/spinner";
+import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { ArrowLeft, Upload } from "lucide-react";
+import { ArrowLeft, Upload, FileText, Download, Trash2, BookOpen } from "lucide-react";
+
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
+
+function deriveCategory(book: { genre?: string | null; language?: string | null }): string {
+  if (book.genre) return book.genre;
+  if (book.language === "zh" || book.language === "zh-TW" || book.language === "zh-CN") return "Chinese";
+  return "General";
+}
 
 export default function BookDetail() {
   const [, navigate] = useLocation();
@@ -19,10 +33,29 @@ export default function BookDetail() {
 
   const book = trpc.books.get.useQuery({ id: bookId });
   const shelves = trpc.shelves.list.useQuery();
+  const files = trpc.files.list.useQuery({ bookId });
+  const utils = trpc.useUtils();
+
   const updateBook = trpc.books.update.useMutation({
     onSuccess: () => {
       book.refetch();
       toast.success("Book updated successfully!");
+    },
+  });
+  const uploadCover = trpc.books.uploadCover.useMutation();
+  const uploadFile = trpc.files.upload.useMutation({
+    onSuccess: () => {
+      utils.files.list.invalidate({ bookId });
+      toast.success("File uploaded successfully!");
+    },
+    onError: (err) => {
+      toast.error("Upload failed: " + err.message);
+    },
+  });
+  const deleteFile = trpc.files.delete.useMutation({
+    onSuccess: () => {
+      utils.files.list.invalidate({ bookId });
+      toast.success("File removed");
     },
   });
 
@@ -30,7 +63,8 @@ export default function BookDetail() {
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
-  const uploadCover = trpc.books.uploadCover.useMutation();
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [formInitialized, setFormInitialized] = useState(false);
 
   const handleCoverFileSelect = useCallback(async (file: File) => {
     if (!file) return;
@@ -56,27 +90,58 @@ export default function BookDetail() {
     }
   }, [uploadCover]);
 
-  // Initialize form data when book loads
-  if (book.data && Object.keys(formData).length === 0) {
-    const b = book.data;
-    setFormData({
-      isbn: b?.isbn || "",
-      title: b?.title || "",
-      authors: b?.authors || "",
-      publisher: b?.publisher || "",
-      published_year: b?.published_year || "",
-      genre: b?.genre || "",
-      description: b?.description || "",
-      page_count: b?.page_count || "",
-      language: b?.language || "",
-      cover_url: b?.cover_url || "",
-      purchase_price: b?.purchase_price || "",
-      shelf_location_id: b?.shelf_location_id || "",
-    });
-    if (b?.cover_url) {
-      setCoverImage(b.cover_url);
+  const handleFileSelect = useCallback(async (file: File) => {
+    if (!file) return;
+    // 16 MB limit
+    if (file.size > 16 * 1024 * 1024) {
+      toast.error("File too large — maximum 16 MB");
+      return;
     }
-  }
+    setUploadingFile(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+      const base64 = btoa(Array.from(uint8).map((b) => String.fromCharCode(b)).join(""));
+      const autoCategory = book.data ? deriveCategory(book.data) : undefined;
+      await uploadFile.mutateAsync({
+        bookId,
+        fileName: file.name,
+        base64,
+        mimeType: file.type || "application/pdf",
+        fileSize: file.size,
+        autoCategory,
+      });
+    } catch {
+      // error handled by mutation
+    } finally {
+      setUploadingFile(false);
+    }
+  }, [bookId, book.data, uploadFile]);
+
+  // Initialize form data when book loads (in useEffect to avoid setState-in-render anti-pattern)
+  useEffect(() => {
+    if (book.data && !formInitialized) {
+      const b = book.data;
+      setFormData({
+        isbn: b?.isbn || "",
+        title: b?.title || "",
+        authors: b?.authors || "",
+        publisher: b?.publisher || "",
+        published_year: b?.published_year || "",
+        genre: b?.genre || "",
+        description: b?.description || "",
+        page_count: b?.page_count || "",
+        language: b?.language || "",
+        cover_url: b?.cover_url || "",
+        purchase_price: b?.purchase_price || "",
+        shelf_location_id: b?.shelf_location_id || "",
+      });
+      if (b?.cover_url) {
+        setCoverImage(b.cover_url);
+      }
+      setFormInitialized(true);
+    }
+  }, [book.data, formInitialized]);
 
   const handleSave = async () => {
     try {
@@ -88,7 +153,7 @@ export default function BookDetail() {
         shelf_location_id: formData.shelf_location_id ? parseInt(formData.shelf_location_id) : undefined,
       });
       setIsEditing(false);
-    } catch (error) {
+    } catch {
       toast.error("Error updating book");
     }
   };
@@ -307,7 +372,6 @@ export default function BookDetail() {
                       variant="outline"
                       onClick={() => {
                         setIsEditing(false);
-                        // Reset form data
                         if (book.data) {
                           const b = book.data;
                           setFormData({
@@ -338,49 +402,31 @@ export default function BookDetail() {
               ) : (
                 <div className="space-y-3 text-sm">
                   {book.data.isbn && (
-                    <div>
-                      <span className="font-semibold">ISBN:</span> {book.data.isbn}
-                    </div>
+                    <div><span className="font-semibold">ISBN:</span> {book.data.isbn}</div>
                   )}
                   {book.data.authors && (
-                    <div>
-                      <span className="font-semibold">Authors:</span> {book.data.authors}
-                    </div>
+                    <div><span className="font-semibold">Authors:</span> {book.data.authors}</div>
                   )}
                   {book.data.publisher && (
-                    <div>
-                      <span className="font-semibold">Publisher:</span> {book.data.publisher}
-                    </div>
+                    <div><span className="font-semibold">Publisher:</span> {book.data.publisher}</div>
                   )}
                   {book.data.published_year && (
-                    <div>
-                      <span className="font-semibold">Published:</span> {book.data.published_year}
-                    </div>
+                    <div><span className="font-semibold">Published:</span> {book.data.published_year}</div>
                   )}
                   {book.data.genre && (
-                    <div>
-                      <span className="font-semibold">Genre:</span> {book.data.genre}
-                    </div>
+                    <div><span className="font-semibold">Genre:</span> {book.data.genre}</div>
                   )}
                   {book.data.language && (
-                    <div>
-                      <span className="font-semibold">Language:</span> {book.data.language}
-                    </div>
+                    <div><span className="font-semibold">Language:</span> {book.data.language}</div>
                   )}
                   {book.data.page_count && (
-                    <div>
-                      <span className="font-semibold">Pages:</span> {book.data.page_count}
-                    </div>
+                    <div><span className="font-semibold">Pages:</span> {book.data.page_count}</div>
                   )}
                   {book.data.purchase_price && (
-                    <div>
-                      <span className="font-semibold">Price:</span> ${book.data.purchase_price}
-                    </div>
+                    <div><span className="font-semibold">Price:</span> ${book.data.purchase_price}</div>
                   )}
                   {book.data.shelf_locations && (
-                    <div>
-                      <span className="font-semibold">Shelf:</span> {book.data.shelf_locations.name}
-                    </div>
+                    <div><span className="font-semibold">Shelf:</span> {book.data.shelf_locations.name}</div>
                   )}
                   {book.data.description && (
                     <div>
@@ -392,6 +438,92 @@ export default function BookDetail() {
               )}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ===== E-BOOK / PDF FILES SECTION ===== */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <BookOpen className="w-5 h-5" />
+              E-Books &amp; Files
+              {files.data && files.data.length > 0 && (
+                <Badge variant="secondary">{files.data.length}</Badge>
+              )}
+            </CardTitle>
+            <Button
+              size="sm"
+              disabled={uploadingFile}
+              onClick={() => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.accept = ".pdf,.epub,.mobi,.txt,.doc,.docx";
+                input.onchange = (e: any) => handleFileSelect(e.target.files[0]);
+                input.click();
+              }}
+            >
+              {uploadingFile ? <Spinner className="w-4 h-4 mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
+              {uploadingFile ? "Uploading..." : "Upload File"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {files.isLoading ? (
+            <div className="flex justify-center py-8">
+              <Spinner className="w-6 h-6" />
+            </div>
+          ) : files.data && files.data.length > 0 ? (
+            <div className="space-y-2">
+              {files.data.map((file) => (
+                <div
+                  key={file.id}
+                  className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors"
+                >
+                  <FileText className="w-8 h-8 text-red-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{file.file_name}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs text-muted-foreground">{formatFileSize(file.file_size)}</span>
+                      {file.auto_category && (
+                        <Badge variant="outline" className="text-xs py-0 h-4">{file.auto_category}</Badge>
+                      )}
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(file.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 w-8 p-0"
+                      asChild
+                    >
+                      <a href={file.file_url} download={file.file_name} target="_blank" rel="noopener noreferrer">
+                        <Download className="w-4 h-4" />
+                      </a>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                      disabled={deleteFile.isPending}
+                      onClick={() => deleteFile.mutate({ id: file.id })}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-10 text-muted-foreground">
+              <FileText className="w-10 h-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">No files attached yet.</p>
+              <p className="text-xs mt-1">Upload a PDF, EPUB, or other document to attach it to this book.</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

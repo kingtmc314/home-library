@@ -97,7 +97,7 @@ export const appRouter = router({
         return await db.deleteBook(input.id);
       }),
 
-    /** Upload a cover image (base64) to Supabase Storage and return the URL */
+    /** Upload a cover image (base64) to Manus S3 storage and return the URL */
     uploadCover: protectedProcedure
       .input(z.object({
         base64: z.string(),
@@ -105,7 +105,6 @@ export const appRouter = router({
         bookId: z.number().optional(),
       }))
       .mutation(async ({ input }) => {
-        // Decode base64 to buffer
         const base64Data = input.base64.replace(/^data:[^;]+;base64,/, "");
         const buffer = Buffer.from(base64Data, "base64");
         const ext = input.mimeType.split("/")[1] || "jpg";
@@ -192,6 +191,61 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         return await db.deleteLoan(input.id);
+      }),
+  }),
+
+  /**
+   * ============ BOOK FILES (PDF / E-BOOKS) ============
+   */
+  files: router({
+    /** List all files, optionally filtered by bookId */
+    list: publicProcedure
+      .input(z.object({ bookId: z.number().optional() }))
+      .query(async ({ input }) => {
+        return await db.listBookFiles(input.bookId);
+      }),
+
+    /** Upload a PDF/file to Manus S3 storage and record it in book_files */
+    upload: protectedProcedure
+      .input(z.object({
+        bookId: z.number(),
+        fileName: z.string().min(1),
+        base64: z.string(),
+        mimeType: z.string().default("application/pdf"),
+        fileSize: z.number().default(0),
+        autoCategory: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const base64Data = input.base64.replace(/^data:[^;]+;base64,/, "");
+        const buffer = Buffer.from(base64Data, "base64");
+        const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const key = `ebooks/${input.bookId}/${Date.now()}-${safeName}`;
+        const { url, key: storedKey } = await storagePut(key, buffer, input.mimeType);
+
+        const record = await db.createBookFile({
+          book_id: input.bookId,
+          file_name: input.fileName,
+          file_key: storedKey,
+          file_url: url,
+          file_size: input.fileSize,
+          mime_type: input.mimeType,
+          auto_category: input.autoCategory,
+        });
+        return record;
+      }),
+
+    /** Delete a file record */
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return await db.deleteBookFile(input.id);
+      }),
+
+    /** Get a single file record (for download URL) */
+    get: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return await db.getBookFile(input.id);
       }),
   }),
 });

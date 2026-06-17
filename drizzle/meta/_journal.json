@@ -8,6 +8,13 @@
       "when": 1781536513767,
       "tag": "0000_perfect_weapon_omega",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1781695597024,
+      "tag": "0001_sleepy_silhouette",
+      "breakpoints": true
     }
   ]
 }

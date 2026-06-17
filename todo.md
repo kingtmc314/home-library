@@ -73,3 +73,15 @@
 - [x] Douban Books scraping fallback for Chinese/mainland books (no key needed)
 - [x] Open Library as 3rd fallback
 - [x] Lookup chain: Google Books → Douban → Open Library → Manual entry
+
+## Round 4: PDF E-Book Attachments
+
+- [x] Add book_files table in Supabase (id, book_id, file_name, file_key, file_url, file_size, mime_type, auto_category, created_at)
+- [x] DB helpers: createBookFile, listBookFiles, deleteBookFile, getBookFile
+- [x] tRPC routes: files.upload, files.list, files.delete, files.get
+- [x] PDF upload UI on BookDetail page (file picker, 16MB limit)
+- [x] File list on BookDetail: name, size, auto-category badge, download button, delete button
+- [x] Auto-categorize PDF by book genre/language (inherit from book metadata)
+- [x] E-Books page in sidebar: browse all PDFs, filter by genre/shelf/ISBN, download
+- [x] Add E-Books nav item to DashboardLayout sidebar
+- [x] Register /app/ebooks route in App.tsx

@@ -483,3 +483,87 @@ export async function getBooksByMonth(): Promise<{ month: string; count: number 
     .map(([month, count]) => ({ month, count }))
     .sort((a, b) => a.month.localeCompare(b.month));
 }
+
+/**
+ * ============ BOOK FILES (PDF / E-BOOKS) ============
+ */
+export interface BookFile {
+  id: number;
+  book_id: number;
+  file_name: string;
+  file_key: string;
+  file_url: string;
+  file_size: number;
+  mime_type: string;
+  auto_category: string | null;
+  created_at: string;
+  updated_at: string;
+  books?: Book;
+}
+
+export async function createBookFile(file: {
+  book_id: number;
+  file_name: string;
+  file_key: string;
+  file_url: string;
+  file_size: number;
+  mime_type: string;
+  auto_category?: string;
+}): Promise<BookFile | null> {
+  const { data, error } = await supabaseAdmin
+    .from("book_files")
+    .insert([{
+      book_id: file.book_id,
+      file_name: file.file_name,
+      file_key: file.file_key,
+      file_url: file.file_url,
+      file_size: file.file_size,
+      mime_type: file.mime_type,
+      auto_category: file.auto_category || null,
+    }])
+    .select(`*, books:book_id (*)`)
+    .single();
+  if (error) {
+    console.error("[DB] Error creating book file:", error);
+    return null;
+  }
+  return data;
+}
+
+export async function listBookFiles(bookId?: number): Promise<BookFile[]> {
+  let query = supabaseAdmin
+    .from("book_files")
+    .select(`*, books:book_id (*)`)
+    .order("created_at", { ascending: false });
+  if (bookId !== undefined) {
+    query = (query as any).eq("book_id", bookId);
+  }
+  const { data, error } = await query;
+  if (error) {
+    console.error("[DB] Error listing book files:", error);
+    return [];
+  }
+  return data || [];
+}
+
+export async function deleteBookFile(id: number): Promise<boolean> {
+  const { error } = await supabaseAdmin.from("book_files").delete().eq("id", id);
+  if (error) {
+    console.error("[DB] Error deleting book file:", error);
+    return false;
+  }
+  return true;
+}
+
+export async function getBookFile(id: number): Promise<BookFile | null> {
+  const { data, error } = await supabaseAdmin
+    .from("book_files")
+    .select(`*, books:book_id (*)`)
+    .eq("id", id)
+    .single();
+  if (error) {
+    console.error("[DB] Error getting book file:", error);
+    return null;
+  }
+  return data;
+}
