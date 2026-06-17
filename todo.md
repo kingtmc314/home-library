@@ -101,3 +101,14 @@
 - [x] Auto-create book record + attach PDF in one step for each uploaded file
 - [x] Bulk upload progress UI: per-file status (looking up / saving / done / failed)
 - [x] Add CSV Import and Bulk PDF Upload nav items to sidebar
+
+## Round 6: AI PDF Metadata Extraction (Complete)
+
+- [x] Install pdf-parse npm package for server-side PDF text extraction
+- [x] tRPC route: files.extractMetadata — accepts base64 PDF, extracts text, uses LLM to parse title/author/ISBN/publisher/year/genre
+- [x] tRPC route: files.extractFromUrl — fetch stored PDF by URL, extract text, parse metadata with LLM
+- [x] BulkPDFUpload: AI Extract button per file, editable metadata preview dialog before saving
+- [x] BookDetail: Sparkles (AI) button on each PDF file → extract info → Apply to Book dialog
+- [x] Fallback to filename parsing if PDF text extraction fails
+- [x] TypeScript check: 0 errors
+- [x] Checkpoint, GitHub push

@@ -10,7 +10,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { ArrowLeft, Upload, FileText, Download, Trash2, BookOpen, Eye, BookOpenCheck } from "lucide-react";
+import { ArrowLeft, Upload, FileText, Download, Trash2, BookOpen, Eye, BookOpenCheck, Sparkles, Loader2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Progress } from "@/components/ui/progress";
 
@@ -77,6 +78,47 @@ export default function BookDetail() {
   const [uploadingCover, setUploadingCover] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [formInitialized, setFormInitialized] = useState(false);
+
+  // AI extract state
+  const extractFromUrl = trpc.files.extractFromUrl.useMutation();
+  const [extractingFileId, setExtractingFileId] = useState<number | null>(null);
+  const [extractResult, setExtractResult] = useState<Record<string, string | null> | null>(null);
+  const [extractDialogOpen, setExtractDialogOpen] = useState(false);
+
+  const handleExtractFromPDF = async (file: { id: number; file_url: string; file_name: string }) => {
+    setExtractingFileId(file.id);
+    try {
+      const result = await extractFromUrl.mutateAsync({
+        fileUrl: file.file_url,
+        fileName: file.file_name,
+        bookId: bookId,
+      });
+      setExtractResult(result as Record<string, string | null>);
+      setExtractDialogOpen(true);
+    } catch (err: any) {
+      toast.error(`AI extraction failed: ${err.message}`);
+    } finally {
+      setExtractingFileId(null);
+    }
+  };
+
+  const applyExtractedMetadata = () => {
+    if (!extractResult) return;
+    setFormData((prev: any) => ({
+      ...prev,
+      ...(extractResult.title && { title: extractResult.title }),
+      ...(extractResult.authors && { authors: extractResult.authors }),
+      ...(extractResult.isbn && { isbn: extractResult.isbn }),
+      ...(extractResult.publisher && { publisher: extractResult.publisher }),
+      ...(extractResult.published_year && { published_year: extractResult.published_year }),
+      ...(extractResult.genre && { genre: extractResult.genre }),
+      ...(extractResult.language && { language: extractResult.language }),
+      ...(extractResult.description && { description: extractResult.description }),
+    }));
+    setIsEditing(true);
+    setExtractDialogOpen(false);
+    toast.success('Metadata applied — review and save to confirm.');
+  };
 
   const handleCoverFileSelect = useCallback(async (file: File) => {
     if (!file) return;
@@ -588,6 +630,18 @@ export default function BookDetail() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      className="h-8 w-8 p-0 text-primary"
+                      title="Extract book info from PDF with AI"
+                      disabled={extractingFileId === file.id}
+                      onClick={() => handleExtractFromPDF(file)}
+                    >
+                      {extractingFileId === file.id
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <Sparkles className="w-4 h-4" />}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       className="h-8 w-8 p-0"
                       onClick={() => setViewerFile({ url: file.file_url, name: file.file_name })}
                     >
@@ -635,6 +689,43 @@ export default function BookDetail() {
         fileName={viewerFile.name}
       />
     )}
+
+    {/* AI Extraction Result Dialog */}
+    <Dialog open={extractDialogOpen} onOpenChange={open => !open && setExtractDialogOpen(false)}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-primary" />
+            AI Extracted Book Info
+          </DialogTitle>
+        </DialogHeader>
+        {extractResult && (
+          <div className="space-y-2 py-2">
+            <p className="text-sm text-muted-foreground mb-3">The following information was extracted from the PDF. Click "Apply to Book" to update the book record.</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+              {Object.entries(extractResult)
+                .filter(([k, v]) => k !== 'error' && v)
+                .map(([key, value]) => (
+                  <div key={key}>
+                    <span className="text-muted-foreground capitalize">{key.replace('_', ' ')}: </span>
+                    <span className="font-medium">{value}</span>
+                  </div>
+                ))}
+            </div>
+            {extractResult.error && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">Note: {extractResult.error}</p>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setExtractDialogOpen(false)}>Cancel</Button>
+          <Button onClick={applyExtractedMetadata}>
+            <Sparkles className="w-4 h-4 mr-2" />
+            Apply to Book
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }

@@ -7,6 +7,7 @@ import * as db from "./db";
 import { lookupBookByISBN } from "./bookLookup";
 import { supabaseAdmin } from "./supabase";
 import { storagePut } from "./storage";
+import { invokeLLM } from "./_core/llm";
 
 export const appRouter = router({
   system: systemRouter,
@@ -310,6 +311,241 @@ export const appRouter = router({
      * If bookId is provided, attach to existing book.
      * If isbn/title provided, look up metadata and create a new book, then attach.
      */
+    /**
+     * Extract book metadata from inside a PDF using text extraction + LLM.
+     * Accepts base64-encoded PDF, returns structured metadata.
+     */
+    extractMetadata: protectedProcedure
+      .input(z.object({
+        base64: z.string(),
+        fileName: z.string().default(''),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const pdfParseModule = await import('pdf-parse');
+          const pdfParse = (pdfParseModule as any).default ?? pdfParseModule;
+          const base64Data = input.base64.replace(/^data:[^;]+;base64,/, '');
+          const buffer = Buffer.from(base64Data, 'base64');
+
+          // Extract text from first ~3 pages (enough for title page + copyright)
+          let pdfText = '';
+          try {
+            const parsed = await pdfParse(buffer, { max: 3 });
+            pdfText = parsed.text?.slice(0, 4000) || '';
+          } catch {
+            pdfText = '';
+          }
+
+          // Use LLM to parse metadata from the extracted text + filename
+          const prompt = [
+            'You are a librarian assistant. Extract book metadata from the following PDF text (first few pages) and filename.',
+            'Return ONLY a JSON object with these fields (use null for unknown):',
+            '{ "title": string|null, "authors": string|null, "isbn": string|null, "publisher": string|null, "published_year": string|null, "genre": string|null, "language": string|null, "description": string|null }',
+            '',
+            `Filename: ${input.fileName}`,
+            '',
+            'PDF text (first pages):',
+            pdfText || '(no text extracted — scanned PDF or encrypted)',
+          ].join('\n');
+
+          const llmResponse = await invokeLLM({
+            messages: [
+              { role: 'system', content: 'You are a precise book metadata extractor. Return only valid JSON, no markdown.' },
+              { role: 'user', content: prompt },
+            ],
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'book_metadata',
+                strict: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    title: { type: ['string', 'null'] },
+                    authors: { type: ['string', 'null'] },
+                    isbn: { type: ['string', 'null'] },
+                    publisher: { type: ['string', 'null'] },
+                    published_year: { type: ['string', 'null'] },
+                    genre: { type: ['string', 'null'] },
+                    language: { type: ['string', 'null'] },
+                    description: { type: ['string', 'null'] },
+                  },
+                  required: ['title', 'authors', 'isbn', 'publisher', 'published_year', 'genre', 'language', 'description'],
+                  additionalProperties: false,
+                },
+              },
+            },
+          });
+
+          const content = llmResponse?.choices?.[0]?.message?.content || '{}';
+          let metadata: Record<string, string | null> = {};
+          try {
+            metadata = JSON.parse(typeof content === 'string' ? content : JSON.stringify(content));
+          } catch {
+            metadata = {};
+          }
+
+          // If ISBN found, try to enrich with Google Books / Douban
+          if (metadata.isbn) {
+            try {
+              const { lookupBookByISBN } = await import('./bookLookup');
+              const enriched = await lookupBookByISBN(metadata.isbn);
+              if (enriched) {
+                metadata.title = metadata.title || enriched.title || null;
+                metadata.authors = metadata.authors || (enriched.authors?.join(', ') ?? null);
+                metadata.publisher = metadata.publisher || enriched.publisher || null;
+                metadata.published_year = metadata.published_year || enriched.publishedYear || null;
+                metadata.genre = metadata.genre || enriched.genre || null;
+                metadata.language = metadata.language || enriched.language || null;
+                metadata.description = metadata.description || enriched.description || null;
+              }
+            } catch { /* ignore enrichment errors */ }
+          }
+
+          return {
+            title: metadata.title || input.fileName.replace(/\.[^.]+$/, '') || null,
+            authors: metadata.authors || null,
+            isbn: metadata.isbn || null,
+            publisher: metadata.publisher || null,
+            published_year: metadata.published_year || null,
+            genre: metadata.genre || null,
+            language: metadata.language || null,
+            description: metadata.description || null,
+          };
+        } catch (err: any) {
+          // Fallback: return just the filename as title
+          return {
+            title: input.fileName.replace(/\.[^.]+$/, '') || null,
+            authors: null, isbn: null, publisher: null,
+            published_year: null, genre: null, language: null, description: null,
+          };
+        }
+      }),
+
+    /**
+     * Extract book metadata from an already-stored PDF by its storage URL.
+     * Downloads the PDF, extracts text, uses LLM to parse metadata.
+     */
+    extractFromUrl: protectedProcedure
+      .input(z.object({
+        fileUrl: z.string(),
+        fileName: z.string().default(''),
+        bookId: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const pdfParseModule = await import('pdf-parse');
+          const pdfParse = (pdfParseModule as any).default ?? pdfParseModule;
+
+          // Fetch the PDF from storage
+          let buffer: Buffer;
+          try {
+            const { ENV } = await import('./_core/env');
+            // Build absolute URL for internal storage proxy
+            const baseUrl = `http://localhost:${process.env.PORT || 3000}`;
+            const fetchUrl = input.fileUrl.startsWith('http') ? input.fileUrl : `${baseUrl}${input.fileUrl}`;
+            const res = await fetch(fetchUrl);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const arrayBuf = await res.arrayBuffer();
+            buffer = Buffer.from(arrayBuf);
+          } catch (fetchErr: any) {
+            throw new Error(`Could not fetch PDF: ${fetchErr.message}`);
+          }
+
+          // Extract text from first 3 pages
+          let pdfText = '';
+          try {
+            const parsed = await pdfParse(buffer, { max: 3 });
+            pdfText = parsed.text?.slice(0, 4000) || '';
+          } catch {
+            pdfText = '';
+          }
+
+          // Use LLM to extract metadata
+          const prompt = [
+            'You are a librarian assistant. Extract book metadata from the following PDF text (first few pages) and filename.',
+            'Return ONLY a JSON object with these fields (use null for unknown):',
+            '{ "title": string|null, "authors": string|null, "isbn": string|null, "publisher": string|null, "published_year": string|null, "genre": string|null, "language": string|null, "description": string|null }',
+            '',
+            `Filename: ${input.fileName}`,
+            '',
+            'PDF text (first pages):',
+            pdfText || '(no text extracted — scanned PDF or encrypted)',
+          ].join('\n');
+
+          const llmResponse = await invokeLLM({
+            messages: [
+              { role: 'system', content: 'You are a precise book metadata extractor. Return only valid JSON, no markdown.' },
+              { role: 'user', content: prompt },
+            ],
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'book_metadata',
+                strict: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    title: { type: ['string', 'null'] },
+                    authors: { type: ['string', 'null'] },
+                    isbn: { type: ['string', 'null'] },
+                    publisher: { type: ['string', 'null'] },
+                    published_year: { type: ['string', 'null'] },
+                    genre: { type: ['string', 'null'] },
+                    language: { type: ['string', 'null'] },
+                    description: { type: ['string', 'null'] },
+                  },
+                  required: ['title', 'authors', 'isbn', 'publisher', 'published_year', 'genre', 'language', 'description'],
+                  additionalProperties: false,
+                },
+              },
+            },
+          });
+
+          const content = llmResponse?.choices?.[0]?.message?.content || '{}';
+          let metadata: Record<string, string | null> = {};
+          try {
+            metadata = JSON.parse(typeof content === 'string' ? content : JSON.stringify(content));
+          } catch {
+            metadata = {};
+          }
+
+          // Enrich via ISBN lookup if ISBN found
+          if (metadata.isbn) {
+            try {
+              const enriched = await lookupBookByISBN(metadata.isbn);
+              if (enriched) {
+                metadata.title = metadata.title || enriched.title || null;
+                metadata.authors = metadata.authors || (enriched.authors?.join(', ') ?? null);
+                metadata.publisher = metadata.publisher || enriched.publisher || null;
+                metadata.published_year = metadata.published_year || enriched.publishedYear || null;
+                metadata.genre = metadata.genre || enriched.genre || null;
+                metadata.language = metadata.language || enriched.language || null;
+                metadata.description = metadata.description || enriched.description || null;
+              }
+            } catch { /* ignore */ }
+          }
+
+          return {
+            title: metadata.title || input.fileName.replace(/\.[^.]+$/, '') || null,
+            authors: metadata.authors || null,
+            isbn: metadata.isbn || null,
+            publisher: metadata.publisher || null,
+            published_year: metadata.published_year || null,
+            genre: metadata.genre || null,
+            language: metadata.language || null,
+            description: metadata.description || null,
+          };
+        } catch (err: any) {
+          return {
+            title: input.fileName.replace(/\.[^.]+$/, '') || null,
+            authors: null, isbn: null, publisher: null,
+            published_year: null, genre: null, language: null, description: null,
+            error: err.message,
+          };
+        }
+      }),
+
     bulkUpload: protectedProcedure
       .input(z.object({
         fileName: z.string().min(1),

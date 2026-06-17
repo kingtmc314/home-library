@@ -4,21 +4,18 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
-  Upload, FileText, CheckCircle2, XCircle, Loader2, AlertCircle, Trash2, BookOpen
+  Upload, FileText, CheckCircle2, XCircle, Loader2, AlertCircle,
+  Trash2, BookOpen, Sparkles, Edit3, FolderOpen,
 } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
 
-// ─── ISBN extraction from filename ───────────────────────────────────────────
-function extractISBN(filename: string): string | null {
-  // Match 13-digit ISBN (978/979 prefix) or 10-digit ISBN
-  const match = filename.match(/(?:isbn[-_]?)?(97[89]\d{10}|\d{9}[\dX])/i);
-  return match ? match[1] : null;
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -35,66 +32,76 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const MAX_FILE_SIZE = 16 * 1024 * 1024; // 16 MB
+const MAX_FILE_SIZE = 16 * 1024 * 1024;
 
-type UploadStatus = "pending" | "uploading" | "done" | "error" | "skipped";
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type ItemStatus = "pending" | "extracting" | "ready" | "uploading" | "done" | "error";
+
+interface ExtractedMeta {
+  title: string | null;
+  authors: string | null;
+  isbn: string | null;
+  publisher: string | null;
+  published_year: string | null;
+  genre: string | null;
+  language: string | null;
+  description: string | null;
+}
 
 interface UploadItem {
   id: string;
   file: File;
-  fileName: string;
-  detectedISBN: string;
-  customISBN: string;
-  customTitle: string;
-  genre: string;
-  status: UploadStatus;
+  status: ItemStatus;
   error?: string;
-  resultBookTitle?: string;
+  meta: ExtractedMeta;
   resultBookId?: number;
+  resultBookTitle?: string;
 }
 
-const GENRES = [
-  "Fiction", "Non-Fiction", "Science", "History", "Biography",
-  "Technology", "Business", "Self-Help", "Children", "Comics",
-  "Art", "Travel", "Cooking", "Religion", "Philosophy", "Other",
-];
+const emptyMeta = (fileName: string): ExtractedMeta => ({
+  title: fileName.replace(/\.pdf$/i, "").replace(/[-_]/g, " ").trim(),
+  authors: null, isbn: null, publisher: null,
+  published_year: null, genre: null, language: null, description: null,
+});
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BulkPDFUpload() {
   const { user } = useAuth();
   const [items, setItems] = useState<UploadItem[]>([]);
-  const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<ExtractedMeta>(emptyMeta(""));
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const extractMetadata = trpc.files.extractMetadata.useMutation();
   const bulkUpload = trpc.files.bulkUpload.useMutation();
   const utils = trpc.useUtils();
 
+  // ── File handling ────────────────────────────────────────────────────────────
+
   const addFiles = useCallback((files: File[]) => {
-    const newItems: UploadItem[] = [];
+    const valid: UploadItem[] = [];
     for (const file of files) {
-      if (!file.type.match(/pdf|epub|mobi|text/) && !file.name.match(/\.(pdf|epub|mobi|txt|docx)$/i)) {
-        toast.error(`${file.name}: unsupported file type`);
+      if (!file.name.match(/\.(pdf)$/i) && file.type !== "application/pdf") {
+        toast.error(`${file.name}: only PDF files are supported`);
         continue;
       }
       if (file.size > MAX_FILE_SIZE) {
         toast.error(`${file.name}: exceeds 16 MB limit`);
         continue;
       }
-      const isbn = extractISBN(file.name);
-      const titleFromName = file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
-      newItems.push({
+      valid.push({
         id: `${file.name}-${Date.now()}-${Math.random()}`,
         file,
-        fileName: file.name,
-        detectedISBN: isbn || "",
-        customISBN: isbn || "",
-        customTitle: titleFromName,
-        genre: "",
         status: "pending",
+        meta: emptyMeta(file.name),
       });
     }
-    if (newItems.length) {
-      setItems(prev => [...prev, ...newItems]);
-      toast.success(`Added ${newItems.length} file${newItems.length > 1 ? "s" : ""}`);
+    if (valid.length) {
+      setItems(prev => [...prev, ...valid]);
+      toast.success(`Added ${valid.length} file${valid.length > 1 ? "s" : ""}`);
     }
   }, []);
 
@@ -104,49 +111,109 @@ export default function BulkPDFUpload() {
     addFiles(Array.from(e.dataTransfer.files));
   }, [addFiles]);
 
-  const updateItem = (id: string, patch: Partial<UploadItem>) => {
+  const updateItem = (id: string, patch: Partial<UploadItem>) =>
     setItems(prev => prev.map(it => it.id === id ? { ...it, ...patch } : it));
-  };
 
-  const removeItem = (id: string) => {
+  const removeItem = (id: string) =>
     setItems(prev => prev.filter(it => it.id !== id));
+
+  // ── AI Extraction ────────────────────────────────────────────────────────────
+
+  const extractOne = async (item: UploadItem) => {
+    updateItem(item.id, { status: "extracting", error: undefined });
+    try {
+      const base64 = await fileToBase64(item.file);
+      const result = await extractMetadata.mutateAsync({
+        base64,
+        fileName: item.file.name,
+      });
+      updateItem(item.id, {
+        status: "ready",
+        meta: {
+          title: result.title || item.meta.title,
+          authors: result.authors || null,
+          isbn: result.isbn || null,
+          publisher: result.publisher || null,
+          published_year: result.published_year || null,
+          genre: result.genre || null,
+          language: result.language || null,
+          description: result.description || null,
+        },
+      });
+      toast.success(`AI extracted info for: ${result.title || item.file.name}`);
+    } catch (err: any) {
+      updateItem(item.id, { status: "error", error: err.message || "Extraction failed" });
+      toast.error(`Extraction failed: ${item.file.name}`);
+    }
   };
 
-  const handleUploadAll = async () => {
-    const pending = items.filter(it => it.status === "pending");
-    if (!pending.length) return;
-    setUploading(true);
-    let success = 0, failed = 0;
+  const extractAll = async () => {
+    const targets = items.filter(it => it.status === "pending" || it.status === "error");
+    if (!targets.length) { toast.info("All files already processed."); return; }
+    for (const item of targets) await extractOne(item);
+  };
 
-    for (const item of pending) {
-      updateItem(item.id, { status: "uploading" });
-      try {
-        const base64 = await fileToBase64(item.file);
-        const result = await bulkUpload.mutateAsync({
-          fileName: item.fileName,
-          base64,
-          mimeType: item.file.type || "application/pdf",
-          fileSize: item.file.size,
-          isbn: item.customISBN || undefined,
-          title: item.customTitle || undefined,
-          genre: item.genre || undefined,
-        });
-        updateItem(item.id, {
-          status: "done",
-          resultBookTitle: result.bookTitle,
-          resultBookId: result.bookId,
-        });
-        success++;
-      } catch (err: any) {
-        updateItem(item.id, { status: "error", error: err.message || "Upload failed" });
-        failed++;
-      }
+  // ── Upload ───────────────────────────────────────────────────────────────────
+
+  const uploadOne = async (item: UploadItem) => {
+    updateItem(item.id, { status: "uploading", error: undefined });
+    try {
+      const base64 = await fileToBase64(item.file);
+      const result = await bulkUpload.mutateAsync({
+        fileName: item.file.name,
+        base64,
+        mimeType: "application/pdf",
+        fileSize: item.file.size,
+        isbn: item.meta.isbn || undefined,
+        title: item.meta.title || item.file.name.replace(/\.pdf$/i, ""),
+        authors: item.meta.authors || undefined,
+        genre: item.meta.genre || undefined,
+      });
+      updateItem(item.id, {
+        status: "done",
+        resultBookId: result.bookId,
+        resultBookTitle: result.bookTitle,
+      });
+    } catch (err: any) {
+      updateItem(item.id, { status: "error", error: err.message || "Upload failed" });
     }
+  };
 
+  const uploadAll = async () => {
+    const targets = items.filter(it => it.status === "ready" || it.status === "pending");
+    if (!targets.length) { toast.info("No files ready to save."); return; }
+    for (const item of targets) await uploadOne(item);
     await utils.books.list.invalidate();
-    await utils.files.list.invalidate({});
-    setUploading(false);
-    toast.success(`Upload complete: ${success} done${failed ? `, ${failed} failed` : ""}`);
+    toast.success(`Saved ${targets.length} book(s) to your library!`);
+  };
+
+  // ── Edit dialog ──────────────────────────────────────────────────────────────
+
+  const openEdit = (item: UploadItem) => {
+    setEditForm({ ...item.meta });
+    setEditingId(item.id);
+  };
+
+  const saveEdit = () => {
+    setItems(prev => prev.map(it =>
+      it.id === editingId
+        ? { ...it, meta: { ...editForm }, status: it.status === "pending" ? "ready" : it.status }
+        : it
+    ));
+    setEditingId(null);
+  };
+
+  // ── Status helpers ───────────────────────────────────────────────────────────
+
+  const statusBadge = (status: ItemStatus, error?: string) => {
+    switch (status) {
+      case "pending":    return <Badge variant="secondary">Pending</Badge>;
+      case "extracting": return <Badge className="bg-blue-500 text-white animate-pulse"><Loader2 className="w-3 h-3 mr-1 animate-spin inline" />Reading PDF…</Badge>;
+      case "ready":      return <Badge className="bg-emerald-500 text-white"><CheckCircle2 className="w-3 h-3 mr-1 inline" />Ready</Badge>;
+      case "uploading":  return <Badge className="bg-amber-500 text-white"><Loader2 className="w-3 h-3 mr-1 animate-spin inline" />Saving…</Badge>;
+      case "done":       return <Badge className="bg-green-600 text-white"><CheckCircle2 className="w-3 h-3 mr-1 inline" />Saved</Badge>;
+      case "error":      return <Badge variant="destructive"><XCircle className="w-3 h-3 mr-1 inline" />Error</Badge>;
+    }
   };
 
   if (!user) {
@@ -160,204 +227,217 @@ export default function BulkPDFUpload() {
   }
 
   const pendingCount = items.filter(it => it.status === "pending").length;
+  const readyCount = items.filter(it => it.status === "ready").length;
   const doneCount = items.filter(it => it.status === "done").length;
   const errorCount = items.filter(it => it.status === "error").length;
+  const canExtract = items.some(it => it.status === "pending" || it.status === "error");
+  const canUpload = items.some(it => it.status === "ready" || it.status === "pending");
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">Bulk PDF Upload</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <Sparkles className="w-6 h-6 text-primary" />
+          Bulk PDF Upload
+        </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Drop multiple PDF files — the system will auto-detect ISBNs from filenames,
-          look up book metadata, create book records, and attach the files automatically.
+          Drop multiple PDFs — AI reads <strong>inside each file</strong> to extract title, author, ISBN,
+          publisher, genre, and language automatically. No need to rename files.
         </p>
       </div>
 
       {/* Drop zone */}
-      <Card
-        className={`border-2 border-dashed transition-colors cursor-pointer ${
-          dragOver ? "border-primary bg-primary/5" : "border-muted-foreground/30 hover:border-primary/50"
+      <div
+        className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${
+          dragOver ? "border-primary bg-primary/5" : "border-muted-foreground/30 hover:border-primary/60"
         }`}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
       >
-        <CardContent className="flex flex-col items-center justify-center py-10 gap-3">
-          <Upload className="w-10 h-10 text-muted-foreground" />
-          <p className="text-sm font-medium">Drop PDF files here, or click to browse</p>
-          <p className="text-xs text-muted-foreground">
-            Supports PDF, EPUB, MOBI, TXT, DOCX · Max 16 MB per file
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Tip: Name files like <code className="bg-muted px-1 rounded">9780743273565-gatsby.pdf</code> for auto ISBN detection
-          </p>
-        </CardContent>
-      </Card>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".pdf,application/pdf"
+          className="hidden"
+          onChange={e => { if (e.target.files) addFiles(Array.from(e.target.files)); e.target.value = ""; }}
+        />
+        <Upload className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+        <p className="font-medium">Drop PDF files here or click to browse</p>
+        <p className="text-sm text-muted-foreground mt-1">PDF only · Max 16 MB per file</p>
+      </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf,.epub,.mobi,.txt,.docx"
-        multiple
-        className="hidden"
-        onChange={e => { if (e.target.files) addFiles(Array.from(e.target.files)); }}
-      />
+      {/* Action bar */}
+      {items.length > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex gap-3 text-sm">
+            <span className="text-muted-foreground">{items.length} file(s)</span>
+            {readyCount > 0 && <span className="text-emerald-600 font-medium">{readyCount} ready</span>}
+            {doneCount > 0 && <span className="text-green-600 font-medium">{doneCount} saved</span>}
+            {errorCount > 0 && <span className="text-destructive font-medium">{errorCount} errors</span>}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setItems([])}>Clear All</Button>
+            <Button variant="outline" onClick={extractAll} disabled={!canExtract}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              Extract All with AI
+            </Button>
+            <Button onClick={uploadAll} disabled={!canUpload}>
+              <Upload className="w-4 h-4 mr-2" />
+              Save All to Library
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* File list */}
       {items.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-base">{items.length} file{items.length > 1 ? "s" : ""} queued</CardTitle>
-                <CardDescription className="text-xs mt-0.5">
-                  {doneCount > 0 && <span className="text-green-600 mr-3">✓ {doneCount} uploaded</span>}
-                  {errorCount > 0 && <span className="text-destructive mr-3">✗ {errorCount} failed</span>}
-                  {pendingCount > 0 && <span className="text-muted-foreground">{pendingCount} pending</span>}
-                </CardDescription>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setItems([])}
-                  disabled={uploading}
-                >
-                  Clear All
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleUploadAll}
-                  disabled={uploading || pendingCount === 0}
-                >
-                  {uploading ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Uploading…</>
-                  ) : (
-                    `Upload ${pendingCount} File${pendingCount !== 1 ? "s" : ""}`
-                  )}
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-0">
-            {items.map(item => (
-              <div
-                key={item.id}
-                className={`rounded-lg border p-3 transition-colors ${
-                  item.status === "done" ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800" :
-                  item.status === "error" ? "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800" :
-                  item.status === "uploading" ? "bg-primary/5 border-primary/30" :
-                  "bg-muted/30"
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  {/* Status icon */}
-                  <div className="mt-0.5 shrink-0">
-                    {item.status === "pending" && <FileText className="w-5 h-5 text-muted-foreground" />}
-                    {item.status === "uploading" && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
-                    {item.status === "done" && <CheckCircle2 className="w-5 h-5 text-green-500" />}
-                    {item.status === "error" && <XCircle className="w-5 h-5 text-destructive" />}
-                  </div>
+        <div className="space-y-3">
+          {items.map(item => (
+            <Card key={item.id} className={`overflow-hidden transition-colors ${
+              item.status === "done" ? "border-green-300 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20" :
+              item.status === "error" ? "border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20" :
+              item.status === "ready" ? "border-emerald-300 dark:border-emerald-800" : ""
+            }`}>
+              <CardContent className="p-4">
+                <div className="flex items-start gap-4">
+                  <FileText className="w-8 h-8 text-red-500 shrink-0 mt-0.5" />
 
                   <div className="flex-1 min-w-0">
-                    {/* Filename + size */}
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-sm font-medium truncate">{item.fileName}</span>
-                      <span className="text-xs text-muted-foreground shrink-0">{formatSize(item.file.size)}</span>
-                      {item.detectedISBN && (
-                        <Badge variant="outline" className="text-xs shrink-0">ISBN detected</Badge>
-                      )}
+                    {/* File name + size + status */}
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="font-medium truncate max-w-xs text-sm">{item.file.name}</span>
+                      <span className="text-xs text-muted-foreground">{formatSize(item.file.size)}</span>
+                      {statusBadge(item.status, item.error)}
                     </div>
 
-                    {/* Done state */}
+                    {/* Extracted metadata */}
+                    {(item.status === "ready" || item.status === "done" || item.status === "uploading") && (
+                      <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-0.5 text-sm">
+                        {item.meta.title && <div><span className="text-muted-foreground">Title: </span><span className="font-medium">{item.meta.title}</span></div>}
+                        {item.meta.authors && <div><span className="text-muted-foreground">Author(s): </span>{item.meta.authors}</div>}
+                        {item.meta.isbn && <div><span className="text-muted-foreground">ISBN: </span><code className="text-xs">{item.meta.isbn}</code></div>}
+                        {item.meta.publisher && <div><span className="text-muted-foreground">Publisher: </span>{item.meta.publisher}</div>}
+                        {item.meta.published_year && <div><span className="text-muted-foreground">Year: </span>{item.meta.published_year}</div>}
+                        {item.meta.genre && <div><span className="text-muted-foreground">Genre: </span>{item.meta.genre}</div>}
+                        {item.meta.language && <div><span className="text-muted-foreground">Language: </span>{item.meta.language}</div>}
+                      </div>
+                    )}
+
+                    {/* Done result */}
                     {item.status === "done" && item.resultBookTitle && (
-                      <div className="flex items-center gap-1.5 text-sm text-green-700 dark:text-green-400">
+                      <div className="flex items-center gap-1.5 text-sm text-green-700 dark:text-green-400 mt-1">
                         <BookOpen className="w-4 h-4" />
-                        <span>Created: <strong>{item.resultBookTitle}</strong></span>
+                        <span>Saved as: <strong>{item.resultBookTitle}</strong></span>
                       </div>
                     )}
 
-                    {/* Error state */}
-                    {item.status === "error" && (
-                      <p className="text-xs text-destructive">{item.error}</p>
-                    )}
-
-                    {/* Editable fields for pending items */}
-                    {(item.status === "pending" || item.status === "uploading") && (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Title (auto-filled)</Label>
-                          <Input
-                            value={item.customTitle}
-                            onChange={e => updateItem(item.id, { customTitle: e.target.value })}
-                            className="h-7 text-xs mt-0.5"
-                            placeholder="Book title"
-                            disabled={item.status === "uploading"}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">ISBN (auto-detected)</Label>
-                          <Input
-                            value={item.customISBN}
-                            onChange={e => updateItem(item.id, { customISBN: e.target.value })}
-                            className="h-7 text-xs mt-0.5 font-mono"
-                            placeholder="e.g. 9780743273565"
-                            disabled={item.status === "uploading"}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Genre</Label>
-                          <Select
-                            value={item.genre}
-                            onValueChange={v => updateItem(item.id, { genre: v })}
-                            disabled={item.status === "uploading"}
-                          >
-                            <SelectTrigger className="h-7 text-xs mt-0.5">
-                              <SelectValue placeholder="Select genre" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {GENRES.map(g => (
-                                <SelectItem key={g} value={g} className="text-xs">{g}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
+                    {/* Error */}
+                    {item.status === "error" && item.error && (
+                      <p className="text-xs text-destructive mt-1">{item.error}</p>
                     )}
                   </div>
 
-                  {/* Remove button */}
-                  {item.status !== "uploading" && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeItem(item.id)}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  )}
+                  {/* Per-file actions */}
+                  <div className="flex gap-1 shrink-0 flex-wrap justify-end">
+                    {(item.status === "pending" || item.status === "error") && (
+                      <Button size="sm" variant="outline" onClick={() => extractOne(item)}>
+                        <Sparkles className="w-3.5 h-3.5 mr-1" />AI Extract
+                      </Button>
+                    )}
+                    {(item.status === "ready" || item.status === "pending") && (
+                      <Button size="sm" variant="outline" onClick={() => openEdit(item)}>
+                        <Edit3 className="w-3.5 h-3.5 mr-1" />Edit
+                      </Button>
+                    )}
+                    {item.status === "ready" && (
+                      <Button size="sm" onClick={() => uploadOne(item)}>
+                        <Upload className="w-3.5 h-3.5 mr-1" />Save
+                      </Button>
+                    )}
+                    {item.status === "done" && item.resultBookId && (
+                      <Button size="sm" variant="outline" asChild>
+                        <a href={`/app/books/${item.resultBookId}`}>
+                          <FolderOpen className="w-3.5 h-3.5 mr-1" />View
+                        </a>
+                      </Button>
+                    )}
+                    {item.status !== "uploading" && item.status !== "extracting" && (
+                      <Button
+                        size="sm" variant="ghost"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => removeItem(item.id)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {items.length === 0 && (
+        <div className="text-center py-12 text-muted-foreground">
+          <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">No files added yet</p>
+          <p className="text-sm mt-1">Drop PDFs above — AI will read inside each file to extract book info</p>
+        </div>
       )}
 
       {/* How it works */}
-      <Card className="bg-muted/30">
+      <Card className="bg-muted/30 border-dashed">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">How it works</CardTitle>
+          <CardTitle className="text-sm">How AI extraction works</CardTitle>
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground space-y-1">
-          <p>1. Drop your PDF files — ISBNs are automatically extracted from filenames (e.g. <code className="bg-muted px-1 rounded">9780743273565-title.pdf</code>)</p>
-          <p>2. If an ISBN is found, the system looks up book metadata (title, author, cover, publisher) from Google Books and Douban</p>
-          <p>3. A new book record is created in your library and the PDF is attached to it</p>
-          <p>4. You can edit the title, ISBN, and genre for each file before uploading</p>
-          <p>5. Files without an ISBN will use the filename as the book title — you can edit it before uploading</p>
+          <p>1. Click <strong>Extract All with AI</strong> — the system reads the first few pages of each PDF to find the title, author, ISBN, publisher, and genre.</p>
+          <p>2. Review the extracted info. Click <strong>Edit</strong> on any file to correct or fill in missing fields.</p>
+          <p>3. Click <strong>Save All to Library</strong> — each PDF is uploaded to cloud storage and a new book record is created automatically.</p>
+          <p className="text-amber-600 dark:text-amber-400">Note: Scanned or image-only PDFs may not yield text — you can still edit the metadata manually before saving.</p>
         </CardContent>
       </Card>
+
+      {/* Edit metadata dialog */}
+      <Dialog open={!!editingId} onOpenChange={open => !open && setEditingId(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Book Metadata</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            {(["title", "authors", "isbn", "publisher", "published_year", "genre", "language"] as const).map(field => (
+              <div key={field} className="grid grid-cols-3 items-center gap-2">
+                <Label className="capitalize text-right text-sm">{field.replace("_", " ")}</Label>
+                <Input
+                  className="col-span-2"
+                  value={editForm[field] || ""}
+                  onChange={e => setEditForm(prev => ({ ...prev, [field]: e.target.value || null }))}
+                  placeholder={`Enter ${field.replace("_", " ")}`}
+                />
+              </div>
+            ))}
+            <div className="grid grid-cols-3 items-start gap-2">
+              <Label className="text-right mt-2 text-sm">Description</Label>
+              <Textarea
+                className="col-span-2"
+                rows={3}
+                value={editForm.description || ""}
+                onChange={e => setEditForm(prev => ({ ...prev, description: e.target.value || null }))}
+                placeholder="Book description"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingId(null)}>Cancel</Button>
+            <Button onClick={saveEdit}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
