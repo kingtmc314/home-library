@@ -7,9 +7,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Spinner } from "@/components/ui/spinner";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit2 } from "lucide-react";
+import { Plus, Trash2, Edit2, Lock } from "lucide-react";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 export default function ShelfLocations() {
+  const { user } = useAuth();
+  const isOwner = (user as any)?.isOwner === true;
   const shelves = trpc.shelves.list.useQuery();
   const createShelf = trpc.shelves.create.useMutation({
     onSuccess: () => {
@@ -54,6 +57,13 @@ export default function ShelfLocations() {
 
   return (
     <div className="space-y-6">
+      {!isOwner && (
+        <div className="flex flex-col items-center justify-center min-h-[40vh] text-center">
+          <Lock className="h-12 w-12 text-muted-foreground opacity-30 mb-3" />
+          <p className="text-muted-foreground">Shelf management is only available to the library owner.</p>
+        </div>
+      )}
+      {isOwner && <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Shelf Locations</h1>
         <p className="text-muted-foreground mt-2">Manage your book shelf locations</p>
@@ -182,6 +192,7 @@ export default function ShelfLocations() {
           </CardContent>
         </Card>
       )}
+    </div>}
     </div>
   );
 }

@@ -22,6 +22,7 @@ function formatFileSize(bytes: number): string {
 
 export default function EBooks() {
   const { user } = useAuth();
+  const isOwner = (user as any)?.isOwner === true;
   const [search, setSearch] = useState("");
   const [filterGenre, setFilterGenre] = useState("all");
   const [filterShelf, setFilterShelf] = useState("all");
@@ -223,7 +224,7 @@ export default function EBooks() {
                           <Download className="w-4 h-4" />
                         </a>
                       </Button>
-                      {user && (
+                      {isOwner && (
                         <Button
                           size="sm"
                           variant="ghost"

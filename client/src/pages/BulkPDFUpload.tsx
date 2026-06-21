@@ -69,6 +69,7 @@ const emptyMeta = (fileName: string): ExtractedMeta => ({
 
 export default function BulkPDFUpload() {
   const { user } = useAuth();
+  const isOwner = (user as any)?.isOwner === true;
   const [items, setItems] = useState<UploadItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -235,6 +236,13 @@ export default function BulkPDFUpload() {
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
+      {!isOwner && (
+        <div className="flex flex-col items-center justify-center min-h-[40vh] text-center">
+          <Upload className="h-12 w-12 text-muted-foreground opacity-30 mb-3" />
+          <p className="text-muted-foreground">Bulk PDF upload is only available to the library owner.</p>
+        </div>
+      )}
+      {isOwner && <>
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -438,6 +446,7 @@ export default function BulkPDFUpload() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </>}
     </div>
   );
 }

@@ -33,12 +33,14 @@ function LoanCard({
   onDelete,
   isReturning,
   isDeleting,
+  isOwner,
 }: {
   loan: any;
   onReturn: (id: number) => void;
   onDelete: (id: number) => void;
   isReturning: boolean;
   isDeleting: boolean;
+  isOwner: boolean;
 }) {
   const isReturned = !!loan.returned_date;
   const isOverdue =
@@ -142,30 +144,32 @@ function LoanCard({
               </p>
             )}
 
-            <div className="flex items-center gap-2">
-              {!isReturned && (
+            {isOwner && (
+              <div className="flex items-center gap-2">
+                {!isReturned && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                    onClick={() => onReturn(loan.id)}
+                    disabled={isReturning}
+                  >
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    Mark Returned
+                  </Button>
+                )}
                 <Button
                   size="sm"
-                  variant="outline"
-                  className="h-7 text-xs bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
-                  onClick={() => onReturn(loan.id)}
-                  disabled={isReturning}
+                  variant="ghost"
+                  className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                  onClick={() => onDelete(loan.id)}
+                  disabled={isDeleting}
                 >
-                  <CheckCircle2 className="w-3 h-3 mr-1" />
-                  Mark Returned
+                  <Trash2 className="w-3 h-3 mr-1" />
+                  Delete
                 </Button>
-              )}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 text-xs text-muted-foreground hover:text-destructive"
-                onClick={() => onDelete(loan.id)}
-                disabled={isDeleting}
-              >
-                <Trash2 className="w-3 h-3 mr-1" />
-                Delete
-              </Button>
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </CardContent>
@@ -174,7 +178,8 @@ function LoanCard({
 }
 
 export default function Loans() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const isOwner = (user as any)?.isOwner === true;
   const utils = trpc.useUtils();
 
   const { data: allLoans, isLoading } = trpc.loans.list.useQuery({ activeOnly: false });
@@ -250,10 +255,12 @@ export default function Loans() {
             Track books you've lent out and when they're due back
           </p>
         </div>
-        <Button onClick={() => setShowLendDialog(true)} className="gap-2">
-          <Plus className="w-4 h-4" />
-          Lend a Book
-        </Button>
+        {isOwner && (
+          <Button onClick={() => setShowLendDialog(true)} className="gap-2">
+            <Plus className="w-4 h-4" />
+            Lend a Book
+          </Button>
+        )}
       </div>
 
       {/* Summary cards */}
@@ -317,6 +324,7 @@ export default function Loans() {
                   onDelete={(id) => setDeleteId(id)}
                   isReturning={returningId === loan.id && returnMutation.isPending}
                   isDeleting={deleteId === loan.id && deleteMutation.isPending}
+                  isOwner={isOwner}
                 />
               ))}
             </div>
@@ -340,6 +348,7 @@ export default function Loans() {
                   onDelete={(id) => setDeleteId(id)}
                   isReturning={returningId === loan.id && returnMutation.isPending}
                   isDeleting={deleteId === loan.id && deleteMutation.isPending}
+                  isOwner={isOwner}
                 />
               ))}
             </div>
@@ -366,6 +375,7 @@ export default function Loans() {
                   onDelete={(id) => setDeleteId(id)}
                   isReturning={returningId === loan.id && returnMutation.isPending}
                   isDeleting={deleteId === loan.id && deleteMutation.isPending}
+                  isOwner={isOwner}
                 />
               ))}
             </div>

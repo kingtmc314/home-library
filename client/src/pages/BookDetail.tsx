@@ -10,10 +10,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { ArrowLeft, Upload, FileText, Download, Trash2, BookOpen, Eye, BookOpenCheck, Sparkles, Loader2 } from "lucide-react";
+import { ArrowLeft, Upload, FileText, Download, Trash2, BookOpen, Eye, BookOpenCheck, Sparkles, Loader2, MessageSquare } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { PDFViewerModal } from "@/components/PDFViewerModal";
 import { Progress } from "@/components/ui/progress";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -33,6 +34,8 @@ export default function BookDetail() {
   const [, navigate] = useLocation();
   const { id } = useParams();
   const bookId = parseInt(id || "0");
+  const { user } = useAuth();
+  const isOwner = (user as any)?.isOwner === true;
 
   const book = trpc.books.get.useQuery({ id: bookId });
   const shelves = trpc.shelves.list.useQuery();
@@ -248,9 +251,31 @@ export default function BookDetail() {
         <CardHeader>
           <div className="flex justify-between items-start">
             <CardTitle>{isEditing ? "Edit Book" : book.data.title}</CardTitle>
-            {!isEditing && (
-              <Button onClick={() => setIsEditing(true)}>Edit</Button>
-            )}
+            <div className="flex gap-2">
+              {!isEditing && isOwner && (
+                <Button onClick={() => setIsEditing(true)}>Edit</Button>
+              )}
+              {!isEditing && !isOwner && user && (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate(`/app/requests?book=${bookId}&type=borrow`)}
+                  >
+                    <BookOpen className="w-4 h-4 mr-1" />
+                    Request to Borrow
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate(`/app/requests?book=${bookId}&type=pdf`)}
+                  >
+                    <MessageSquare className="w-4 h-4 mr-1" />
+                    Request PDF
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </CardHeader>
 

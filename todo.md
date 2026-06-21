@@ -112,3 +112,20 @@
 - [x] Fallback to filename parsing if PDF text extraction fails
 - [x] TypeScript check: 0 errors
 - [x] Checkpoint, GitHub push
+
+## Round 7: Guest Access + Request/Chat System
+
+- [x] Create book_requests table in Supabase (id, book_id, requester_id, requester_name, type: borrow|pdf, status: pending|approved|denied, created_at)
+- [x] Create request_messages table in Supabase (id, request_id, sender_id, sender_name, message, created_at)
+- [x] DB helpers: createRequest, listRequests, updateRequestStatus, createMessage, listMessages
+- [x] tRPC routes: requests.create, requests.list, requests.updateStatus, requests.get
+- [x] tRPC routes: messages.send, messages.list
+- [x] Owner-only guards: hide Add Book / Edit / Delete / Lend buttons for non-owner users
+- [x] Guest-facing: "Request to Borrow" and "Request PDF" buttons on book detail page
+- [x] Guest request form: type, message, contact info
+- [x] Per-request chat thread: guest and owner can exchange messages
+- [x] Owner Requests inbox page: list all requests with status badges, open chat thread
+- [x] Owner can approve/deny requests from inbox
+- [x] Owner notification (notifyOwner) on new request and new message
+- [x] Add Requests nav item to sidebar (owner: inbox; guest: my requests)
+- [x] Checkpoint, GitHub push

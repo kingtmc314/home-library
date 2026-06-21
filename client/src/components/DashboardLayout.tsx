@@ -21,21 +21,23 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { Camera, BookOpen, Boxes, BarChart3, LogOut, PanelLeft, BookMarked, FileText, Upload, TableProperties } from "lucide-react";
+import { Camera, BookOpen, Boxes, BarChart3, LogOut, PanelLeft, BookMarked, FileText, Upload, TableProperties, MessageSquare, Inbox } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 
-const menuItems = [
-  { icon: Camera, label: "Scan & Add", path: "/app/scan" },
-  { icon: BookOpen, label: "My Library", path: "/app/library" },
-  { icon: Boxes, label: "Shelf Locations", path: "/app/shelves" },
-  { icon: BarChart3, label: "Stats", path: "/app/stats" },
-  { icon: BookMarked, label: "Loan Tracker", path: "/app/loans" },
-  { icon: FileText, label: "E-Books", path: "/app/ebooks" },
-  { icon: Upload, label: "Bulk PDF Upload", path: "/app/bulk-pdf" },
-  { icon: TableProperties, label: "CSV Import", path: "/app/csv-import" },
+const allMenuItems = [
+  { icon: BookOpen, label: "My Library", path: "/app/library", ownerOnly: false },
+  { icon: BarChart3, label: "Stats", path: "/app/stats", ownerOnly: false },
+  { icon: FileText, label: "E-Books", path: "/app/ebooks", ownerOnly: false },
+  { icon: MessageSquare, label: "My Requests", path: "/app/requests", ownerOnly: false },
+  { icon: Camera, label: "Scan & Add", path: "/app/scan", ownerOnly: true },
+  { icon: Boxes, label: "Shelf Locations", path: "/app/shelves", ownerOnly: true },
+  { icon: BookMarked, label: "Loan Tracker", path: "/app/loans", ownerOnly: true },
+  { icon: Upload, label: "Bulk PDF Upload", path: "/app/bulk-pdf", ownerOnly: true },
+  { icon: TableProperties, label: "CSV Import", path: "/app/csv-import", ownerOnly: true },
+  { icon: Inbox, label: "Requests Inbox", path: "/app/requests-inbox", ownerOnly: true },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -113,6 +115,8 @@ function DashboardLayoutContent({
   setSidebarWidth,
 }: DashboardLayoutContentProps) {
   const { user, logout } = useAuth();
+  const isOwner = (user as any)?.isOwner === true;
+  const menuItems = allMenuItems.filter(item => !item.ownerOnly || isOwner);
   const [location, setLocation] = useLocation();
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";

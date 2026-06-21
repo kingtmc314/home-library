@@ -624,3 +624,105 @@ export async function getReadingStats(): Promise<{
     currentlyReading: readingResult.data || [],
   };
 }
+
+/**
+ * ============ BOOK REQUESTS & CHAT ============
+ */
+export interface BookRequest {
+  id: number;
+  book_id: number;
+  requester_open_id: string;
+  requester_name: string | null;
+  request_type: 'borrow' | 'pdf';
+  status: 'pending' | 'approved' | 'denied' | 'returned';
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+  books?: Book;
+}
+
+export interface RequestMessage {
+  id: number;
+  request_id: number;
+  sender_open_id: string;
+  sender_name: string | null;
+  message: string;
+  created_at: string;
+}
+
+export async function createBookRequest(data: {
+  book_id: number;
+  requester_open_id: string;
+  requester_name: string | null;
+  request_type: 'borrow' | 'pdf';
+  note?: string;
+}): Promise<BookRequest | null> {
+  const { data: row, error } = await supabaseAdmin
+    .from("book_requests")
+    .insert({
+      book_id: data.book_id,
+      requester_open_id: data.requester_open_id,
+      requester_name: data.requester_name,
+      request_type: data.request_type,
+      note: data.note || null,
+      status: 'pending',
+    })
+    .select(`*, books:book_id (*)`)
+    .single();
+  if (error) { console.error("[DB] createBookRequest error:", error); return null; }
+  return row;
+}
+
+export async function listBookRequests(filters?: {
+  requester_open_id?: string;
+  status?: string;
+}): Promise<BookRequest[]> {
+  let query = supabaseAdmin
+    .from("book_requests")
+    .select(`*, books:book_id (*)`)
+    .order("created_at", { ascending: false });
+  if (filters?.requester_open_id) query = query.eq("requester_open_id", filters.requester_open_id);
+  if (filters?.status) query = query.eq("status", filters.status);
+  const { data, error } = await query;
+  if (error) { console.error("[DB] listBookRequests error:", error); return []; }
+  return data || [];
+}
+
+export async function updateBookRequestStatus(
+  id: number,
+  status: 'pending' | 'approved' | 'denied' | 'returned'
+): Promise<BookRequest | null> {
+  const { data, error } = await supabaseAdmin
+    .from("book_requests")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select(`*, books:book_id (*)`)
+    .single();
+  if (error) { console.error("[DB] updateBookRequestStatus error:", error); return null; }
+  return data;
+}
+
+export async function addRequestMessage(data: {
+  request_id: number;
+  sender_open_id: string;
+  sender_name: string | null;
+  message: string;
+}): Promise<RequestMessage | null> {
+  const { data: row, error } = await supabaseAdmin
+    .from("request_messages")
+    .insert(data)
+    .select()
+    .single();
+  if (error) { console.error("[DB] addRequestMessage error:", error); return null; }
+  return row;
+}
+
+export async function listRequestMessages(request_id: number): Promise<RequestMessage[]> {
+  const { data, error } = await supabaseAdmin
+    .from("request_messages")
+    .select("*")
+    .eq("request_id", request_id)
+    .order("created_at", { ascending: true });
+  if (error) { console.error("[DB] listRequestMessages error:", error); return []; }
+  return data || [];
+}

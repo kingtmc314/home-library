@@ -12,7 +12,13 @@ import { invokeLLM } from "./_core/llm";
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query(opts => {
+      if (!opts.ctx.user) return null;
+      return {
+        ...opts.ctx.user,
+        isOwner: opts.ctx.user.openId === (process.env.OWNER_OPEN_ID ?? ''),
+      };
+    }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -617,6 +623,96 @@ export const appRouter = router({
         });
 
         return { file: record, bookId, bookTitle };
+      }),
+  }),
+
+  /**
+   * ============ BOOK REQUESTS & CHAT ============
+   */
+  requests: router({
+    // Any logged-in user can create a request
+    create: protectedProcedure
+      .input(z.object({
+        book_id: z.number(),
+        request_type: z.enum(['borrow', 'pdf']),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const req = await db.createBookRequest({
+          book_id: input.book_id,
+          requester_open_id: ctx.user.openId,
+          requester_name: ctx.user.name || null,
+          request_type: input.request_type,
+          note: input.note,
+        });
+        if (!req) throw new Error('Failed to create request');
+        // Notify owner
+        try {
+          const { notifyOwner } = await import('./_core/notification');
+          await notifyOwner({
+            title: `New ${input.request_type === 'pdf' ? 'PDF' : 'Borrow'} Request`,
+            content: `${ctx.user.name || 'Someone'} requested ${input.request_type === 'pdf' ? 'PDF access to' : 'to borrow'} book #${input.book_id}. Note: ${input.note || 'none'}`,
+          });
+        } catch {}
+        return req;
+      }),
+
+    // Owner sees all requests; guest sees their own
+    list: protectedProcedure
+      .input(z.object({ myOnly: z.boolean().optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        const isOwner = ctx.user.openId === process.env.OWNER_OPEN_ID;
+        if (isOwner && !input?.myOnly) {
+          return await db.listBookRequests();
+        }
+        return await db.listBookRequests({ requester_open_id: ctx.user.openId });
+      }),
+
+    // Owner only: update status
+    updateStatus: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(['pending', 'approved', 'denied', 'returned']),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const isOwner = ctx.user.openId === process.env.OWNER_OPEN_ID;
+        if (!isOwner) throw new Error('Only the owner can update request status');
+        return await db.updateBookRequestStatus(input.id, input.status);
+      }),
+
+    // Send a chat message on a request
+    sendMessage: protectedProcedure
+      .input(z.object({
+        request_id: z.number(),
+        message: z.string().min(1),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const msg = await db.addRequestMessage({
+          request_id: input.request_id,
+          sender_open_id: ctx.user.openId,
+          sender_name: ctx.user.name || null,
+          message: input.message,
+        });
+        if (!msg) throw new Error('Failed to send message');
+        // Notify owner if sender is not owner
+        const isOwner = ctx.user.openId === process.env.OWNER_OPEN_ID;
+        if (!isOwner) {
+          try {
+            const { notifyOwner } = await import('./_core/notification');
+            await notifyOwner({
+              title: 'New message on a book request',
+              content: `${ctx.user.name || 'Someone'} sent: "${input.message}"`,
+            });
+          } catch {}
+        }
+        return msg;
+      }),
+
+    // List messages for a request
+    listMessages: protectedProcedure
+      .input(z.object({ request_id: z.number() }))
+      .query(async ({ input }) => {
+        return await db.listRequestMessages(input.request_id);
       }),
   }),
 });

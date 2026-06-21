@@ -7,9 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { Search, Trash2, Edit2, BookOpen } from "lucide-react";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 export default function MyLibrary() {
   const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const isOwner = (user as any)?.isOwner === true;
   const [searchQuery, setSearchQuery] = useState("");
   const [filterGenre, setFilterGenre] = useState("all");
   const [filterShelf, setFilterShelf] = useState("all");
@@ -192,32 +195,49 @@ export default function MyLibrary() {
                 )}
 
                 <div className="flex gap-1 pt-1">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="flex-1 h-7 text-xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigate(`/app/library/${book.id}`);
-                    }}
-                  >
-                    <Edit2 className="w-3 h-3 mr-1" />
-                    Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="flex-1 h-7 text-xs text-destructive hover:text-destructive"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (confirm(`Delete "${book.title}"?`)) {
-                        deleteBook.mutate({ id: book.id });
-                      }
-                    }}
-                  >
-                    <Trash2 className="w-3 h-3 mr-1" />
-                    Delete
-                  </Button>
+                  {isOwner ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="flex-1 h-7 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/app/library/${book.id}`);
+                        }}
+                      >
+                        <Edit2 className="w-3 h-3 mr-1" />
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="flex-1 h-7 text-xs text-destructive hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Delete "${book.title}"?`)) {
+                            deleteBook.mutate({ id: book.id });
+                          }
+                        }}
+                      >
+                        <Trash2 className="w-3 h-3 mr-1" />
+                        Delete
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="w-full h-7 text-xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/app/library/${book.id}`);
+                      }}
+                    >
+                      <BookOpen className="w-3 h-3 mr-1" />
+                      View
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

@@ -54,6 +54,7 @@ const SAMPLE_CSV = `title,authors,isbn,genre,publisher,year,price,shelf,language
 
 export default function CSVImport() {
   const { user } = useAuth();
+  const isOwner = (user as any)?.isOwner === true;
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [importing, setImporting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -165,6 +166,13 @@ export default function CSVImport() {
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
+      {!isOwner && (
+        <div className="flex flex-col items-center justify-center min-h-[40vh] text-center">
+          <FileText className="h-12 w-12 text-muted-foreground opacity-30 mb-3" />
+          <p className="text-muted-foreground">CSV import is only available to the library owner.</p>
+        </div>
+      )}
+      {isOwner && <>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">CSV Bulk Import</h1>
@@ -316,6 +324,7 @@ export default function CSVImport() {
           <p className="mt-2">Wrap values containing commas in double quotes. Download the sample CSV above for a template.</p>
         </CardContent>
       </Card>
+      </>}
     </div>
   );
 }
